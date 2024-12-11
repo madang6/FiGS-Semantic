@@ -9,11 +9,15 @@ description = "Flying in Gaussian Splats"
 authors = [{ name = "JunEn Low", email = "lowjunen@gmail.com.com" }]
 license = { file = "LICENSE" }
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 dependencies = [
     "numpy",
     "scipy",
-    "pytest"
+    "qpsolvers",
+    "ipykernel",
+    "ipympl",
+    "torch==2.1.2",
+    "torchvision==0.16.2",
 ]
 
 [tool.setuptools.packages.find]

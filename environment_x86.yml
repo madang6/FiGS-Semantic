@@ -1,16 +1,31 @@
 name: figs
 channels:
-  - defaults
-  - conda-forge
+  - conda-forge  # Prefer community-maintained packages first
+  - pytorch      # Specific channel for PyTorch packages
+  - fastai       # Added for opencv-python-headless (if necessary)
+  - nvidia/label/cuda-11.8.0  # For NVIDIA-specific CUDA tools
+  - defaults     # Default channel as fallback
 dependencies:
   - python=3.10
   - numpy
   - scipy
   - qpsolvers
+  - albumentations
+  - imageio[ffmpeg]
+  - ninja
   - ipykernel
   - ipympl
+  - fastai::opencv-python-headless=4.10.0.84
+  - pytorch=2.1.2
+  - torchvision=0.16.2
+  - pytorch-cuda=11.8
+  - nvidia/label/cuda-11.8.0::cuda-toolkit
+  - nvidia/label/cuda-11.8.0::cuda-nvcc
   - pip
   - pip:
+    - git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+    - nerfstudio==1.1.5
+    - gsplat==1.4.0
     - -e .
     - -e ./acados/interfaces/acados_template/
 prefix: /home/lowjunen/anaconda3/envs/figs

@@ -3,14 +3,14 @@ import shutil
 import os
 import numpy as np
 import scipy.linalg
-import flight_control.splines.min_snap as ms
-import flight_control.utilities.trajectory_helper as th
-import flight_control.utilities.dynamics_helper as dh
+import trajectories.min_snap as ms
+import utilities.trajectory_helper as th
+import utilities.dynamics_helper as dh
 
-from flight_control.controller.base_controller import BaseController
+from controller.base_controller import BaseController
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
 from casadi import vertcat
-from flight_control.dynamics.quadcopter_model import export_quadcopter_ode_model
+from dynamics.quadcopter_model import export_quadcopter_ode_model
 from typing import Union,Tuple,Dict
 from copy import deepcopy
 # import visualize.plot_synthesize as ps

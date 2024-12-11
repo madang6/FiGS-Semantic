@@ -35,7 +35,7 @@ class Configs:
 
         # Set the configuration directory
         if default_config_path is None:
-            default_workspace_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+            default_workspace_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
             self.default_config_path = os.path.join(default_workspace_path, 'configs')
         else:
             self.default_config_path = default_config_path
