@@ -11,7 +11,7 @@ dependencies:
   - ipympl
   - pip
   - pip:
-    - -e ./figs/flight_control
-    - -e ./flight_control/acados/interfaces/acados_template/
-prefix: /home/lowjunen/anaconda3/envs/msl-env
+    - -e .
+    - -e ./acados/interfaces/acados_template/
+prefix: /home/lowjunen/anaconda3/envs/figs
 
