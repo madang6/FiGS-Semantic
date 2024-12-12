@@ -58,8 +58,7 @@ def generate_specifications(
     m,Impp = drn_prms["mass"],drn_prms["massless_inertia"]
     lf,lb = drn_prms["arm_front"],drn_prms["arm_back"]
     fn,tG = drn_prms["force_normalized"],drn_prms["torque_gain"]
-    n_rtr = drn_prms["number_of_rotors"]
-    T_c2b = drn_prms["camera_to_body_transform"]
+    n_mtr = drn_prms["number_of_rotors"]
     lbu,ubu = ctl_prms["bounds"]["lower"],ctl_prms["bounds"]["upper"]
 
     # Initialize the dictionary
@@ -72,13 +71,12 @@ def generate_specifications(
     quad["lf"] = np.array(lf)
     quad["lb"] = np.array(lb)
     quad["fn"],quad["tg"] = fn, tG
-
+    
     # Model Constants
     quad["nx_fs"],quad["nu_fs"] = 13,4
     quad["nx_br"],quad["nu_br"] = 10,4
     quad["nu_va"] = 5
-    quad["n_rtr"] = n_rtr
-    quad["T_c2b"] = np.array(T_c2b)
+    quad["n_rtr"] = n_mtr
     quad["lbu"] = np.array(lbu)
     quad["ubu"] = np.array(ubu)
 
