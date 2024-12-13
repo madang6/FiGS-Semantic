@@ -1,18 +1,16 @@
 import numpy as np
-import os
 import torch
-from pathlib import Path
-from typing import Dict,Union
+from utilities.configs import ConFiGS
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.utils.eval_utils import eval_setup
 
 class SceneRender():
-    def __init__(self, gsplat_config: Dict[str,Union[str,Path]]) -> None:
+    def __init__(self, config: ConFiGS) -> None:
         """
         SceneRender class for rendering images from GSplat pipeline.
 
         Args:
-        - gsplat_config: Path to GSplat configuration file.
+        - config: FiGS configuration dictionary.
 
         Variables:
         - device: Device to run the pipeline on.
@@ -23,23 +21,29 @@ class SceneRender():
 
         """
         
-        # Some useful constants
+        # Extract the relevant configurations
+        gsplat_config = config.get_config("gaussian_splat")
+        drone_config  = config.get_config("drone_parameters")
+
+        # Some useful intermediate variables
+        width,height = drone_config["camera"]["width"],drone_config["camera"]["height"]
+        fx,fy = drone_config["camera"]["fx"],drone_config["camera"]["fy"]
+        cx,cy = drone_config["camera"]["cx"],drone_config["camera"]["cy"]
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         T_w2g = np.array([
-            [ 1.000, 0.000, 0.000, 0.000],
-            [ 0.000,-1.000, 0.000, 0.000],
-            [ 0.000, 0.000,-1.000, 0.000],
-            [ 0.000, 0.000, 0.000, 1.000]
+            [ 1.00, 0.00, 0.00, 0.00],
+            [ 0.00,-1.00, 0.00, 0.00],
+            [ 0.00, 0.00,-1.00, 0.00],
+            [ 0.00, 0.00, 0.00, 1.00]
         ])
 
         # Class variables
         self.device = device
         self.config,self.pipeline, _, _ = eval_setup(gsplat_config["path"],test_mode="inference")
-        self.camera_out = self.generate_output_camera()
+        self.camera_out = self.generate_output_camera(width,height,fx,fy,cx,cy)
         self.T_w2g = T_w2g
 
-    def generate_output_camera(self, width:int=640, height:int=360,
-                 fx:float=462.956, fy:float=463.002,cx:float=323.076, cy:float=181.184) -> Cameras:
+    def generate_output_camera(self, width:int, height:int, fx:float, fy:float, cx:float, cy:float) -> Cameras:
         """
         Generate an output camera for the pipeline. By default we use the realsense camera parameters
         when it is set to out 640x360 resolution.

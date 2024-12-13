@@ -7,14 +7,12 @@ from typing import Dict,Union
 
 def generate_specifications(
         drn_prms:Dict[str,Union[float,np.ndarray]],
-        ctl_prms:Dict[str,Union[float,np.ndarray]],
         name:str='the_shepherd') -> Dict["str",Union[float,np.ndarray]]:
     """
     Generate a dictionary with the full drone specifications.
     
     Args:
         drn_prms:       Dictionary containing the drone parameters.
-        ctl_prms:       Dictionary containing the controller parameters.
         name:           Name of the quadcopter.
 
     Variable Constants:
@@ -60,7 +58,7 @@ def generate_specifications(
     fn,tG = drn_prms["force_normalized"],drn_prms["torque_gain"]
     n_rtr = drn_prms["number_of_rotors"]
     T_c2b = drn_prms["camera_to_body_transform"]
-    lbu,ubu = ctl_prms["bounds"]["lower"],ctl_prms["bounds"]["upper"]
+    camera = drn_prms["camera"]
 
     # Initialize the dictionary
     quad = {}
@@ -79,8 +77,7 @@ def generate_specifications(
     quad["nu_va"] = 5
     quad["n_rtr"] = n_rtr
     quad["T_c2b"] = np.array(T_c2b)
-    quad["lbu"] = np.array(lbu)
-    quad["ubu"] = np.array(ubu)
+    quad["camera"] = camera
 
     # Derive Quadcopter Constants
     fMw = fn*np.array([

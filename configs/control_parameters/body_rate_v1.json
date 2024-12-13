@@ -1,5 +1,4 @@
 {
-    "name": "body_rate_v1", 
     "type": "body-rate",
     "hz": 20,
     "use_RTI": false,

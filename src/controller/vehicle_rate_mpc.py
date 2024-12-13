@@ -6,33 +6,25 @@ import scipy.linalg
 import tsplines.min_snap as ms
 import utilities.trajectory_helper as th
 import utilities.dynamics_helper as dh
+from utilities.configs import ConFiGS
 
 from controller.base_controller import BaseController
-from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
+from acados_template import AcadosOcp, AcadosOcpSolver
 from casadi import vertcat
 from dynamics.quadcopter_model import export_quadcopter_ode_model
 from typing import Union,Tuple,Dict
 from copy import deepcopy
-# import visualize.plot_synthesize as ps
+import visualize.plot_trajectories as pt
 
 class VehicleRateMPC(BaseController):
-    def __init__(self,
-                 fout_wps:Dict[str,Dict[str,Union[float,np.ndarray]]],
-                 mpc_prms:Dict[str,Union[float,np.ndarray]],
-                 drn_prms:Dict[str,Union[float,np.ndarray]],
-                 ctl_prms:Dict[str,Union[float,np.ndarray]],
-                 name:str="vrmpc") -> None:
+    def __init__(self, config:ConFiGS, name:str="vrmpc") -> None:
         
         """
         Constructor for the VehicleRateMPC class.
         
         Args:
-            - fout_wps: Dictionary containing the flat output waypoints.
-            - mpc_prms: Dictionary containing the MPC parameters.
-            - drn_prms: Dictionary containing the drone parameters.
-            - ctl_prms: Dictionary containing the controller parameters.
-            - hz_ctrl:  Controller frequency.
-            - name:     Name of the policy.
+            - config: FiGS configuration dictionary.
+            - name:   Name of the policy.
 
         Variables:
             - name:    Name of the policy.
@@ -60,7 +52,11 @@ class VehicleRateMPC(BaseController):
         # =====================================================================
         # Extract parameters
         # =====================================================================
-
+        fout_wps = config.get_config("fout_waypoints")
+        mpc_prms = config.get_config("mpc_parameters")
+        drn_prms = config.get_config("drone_parameters")
+        ctl_prms = config.get_config("control_parameters")
+        
         # MPC Parameters
         Nhn = mpc_prms["horizon"]
         Qk,Rk,QN = np.diag(mpc_prms["Qk"]),np.diag(mpc_prms["Rk"]),np.diag(mpc_prms["QN"])
@@ -68,12 +64,12 @@ class VehicleRateMPC(BaseController):
 
         # Control Parameters
         hz_ctl,use_RTI,tpad= ctl_prms["hz"],ctl_prms["use_RTI"],ctl_prms["terminal_padding"]
+        lbu,ubu = np.array(ctl_prms["bounds"]["lower"]),np.array(ctl_prms["bounds"]["upper"])
 
         # Derived Parameters
-        traj_config_pd = self.pad_trajectory(fout_wps,Nhn,hz_ctl,tpad)
-        drn_spec = dh.generate_specifications(drn_prms,ctl_prms)
+        traj_config_pd = self.pad_trajectory(fout_wps,Nhn,hz_ctl)
+        drn_spec = dh.generate_specifications(drn_prms)
         nx,nu = drn_spec["nx_br"], drn_spec["nu_br"]
-        lbu,ubu = drn_spec["lbu"],drn_spec["lbu"]
 
         ny,ny_e = nx+nu,nx
         solver_json = 'acados_ocp_nlp_'+name+'.json'
@@ -90,8 +86,8 @@ class VehicleRateMPC(BaseController):
             raise ValueError("Padded trajectory (for VehicleRateMPC) not feasible. Aborting.")
         
         # Convert to desired tXU
-        tXUd = th.ts_to_tXU(Tpi,CPi,drn_spec,hz_ctl)
-        
+        tXUd = th.TS_to_tXU(Tpi,CPi,drn_spec,hz_ctl)
+
         # =====================================================================
         # Setup Acados Variables
         # =====================================================================
@@ -132,25 +128,29 @@ class VehicleRateMPC(BaseController):
         ocp.solver_options.qp_solver_cond_N = Nhn
         ocp.solver_options.tf = Nhn/hz_ctl
         ocp.solver_options.qp_solver_warm_start = 1
-        
+
+        ocp.code_export_directory = os.path.join(ocp.code_export_directory,name)
+
         # =====================================================================
         # Controller Variables
         # =====================================================================
 
-        self.name = "VehicleRateMPC"
+        # Base Controller Variables
+        super().__init__(name,hz_ctl)
+
+        # Controller Specific Variables
         self.Nx,self.Nu = nx,nu
         self.tXUd = tXUd
         self.Qk,self.Rk,self.QN = Qk,Rk,QN
         self.Ws = Ws
         self.lbu,self.ubu = lbu,ubu
         self.ns = int(hz_ctl/5)
-        self.hz = hz_ctl
         self.use_RTI = use_RTI
         self.model = ocp.model
         self.solver = AcadosOcpSolver(ocp,json_file=solver_json,verbose=False)
-        self.export_dir = ocp.code_export_directory
-        self.solver_path = os.path.join(os.path.dirname(self.export_dir),solver_json)
-        self.simulator_path = None
+
+        self.code_export_path = ocp.code_export_directory
+        self.solver_path = os.path.join(os.getcwd(),solver_json)
 
         # =====================================================================
         # Warm start the solver
@@ -231,7 +231,7 @@ class VehicleRateMPC(BaseController):
         return ucc,None,None,tsol
 
     def pad_trajectory(self,fout_wps:Dict[str,Union[str,int,Dict[str,Union[float,np.ndarray]]]],
-                       Nhn:int,hz_ctl:float,tpad:float) -> Dict[str,Dict[str,Union[float,np.ndarray]]]:
+                       Nhn:int,hz_ctl:float) -> Dict[str,Dict[str,Union[float,np.ndarray]]]:
         """
         Method to pad the trajectory with the final waypoint so that the MPC horizon is satisfied at the end of the trajectory.
 
@@ -239,7 +239,6 @@ class VehicleRateMPC(BaseController):
         fout_wps:   Dictionary containing the flat output waypoints.
         Nhn:        Prediction horizon.
         hz_ctl:     Controller frequency.
-        tpad:       Padding time.
 
         Returns:
         fout_wps_pd: Padded flat output waypoints.
@@ -250,7 +249,7 @@ class VehicleRateMPC(BaseController):
         kff = list(fout_wps["keyframes"])[-1]
         
         # Pad trajectory
-        t_pd = fout_wps["keyframes"][kff]["t"]+Nhn/hz_ctl+tpad
+        t_pd = fout_wps["keyframes"][kff]["t"]+((Nhn+1)/hz_ctl)
         fo_pd = np.array(fout_wps["keyframes"][kff]["fo"])[:,0:3].tolist()
 
         fout_wps_pd = deepcopy(fout_wps)
@@ -298,36 +297,19 @@ class VehicleRateMPC(BaseController):
             ydes = np.hstack((ydes,np.tile(ydes[:,-1:],(1,idxf-self.tXUd.shape[1]))))
 
         return ydes
-
-    def generate_simulator(self,hz):
-        """
-        Method to generate the Acados simulator for the VehicleRateMPC controller.
-
-        Args:
-        hz:    Frequency of the simulator.
-
-        Returns:
-        sim:   AcadosSimSolver object.
-        """
-
-        sim = AcadosSim()
-        sim.model = self.model
-        sim.solver_options.T = 1/hz
-        sim.solver_options.integrator_type = 'IRK'
-
-        sim_json = 'acados_sim_nlp.json'
-        self.simulator_path = os.path.join(os.path.dirname(self.code_export_directory),sim_json)
-
-        return AcadosSimSolver(sim,json_file=sim_json,verbose=False)
     
     def clear_generated_code(self):
         """
         Method to clear the generated code and files to ensure the code is recompiled correctly each time.
         """
-        
+
         try:
             os.remove(self.solver_path)
-            shutil.rmtree(self.export_dir)
-            os.remove(self.simulator_path)
+            shutil.rmtree(self.code_export_path)
         except:
             pass
+
+        # Clear the parent directory if empty
+        parent_dir_path = os.path.dirname(self.code_export_path)
+        if not os.listdir(parent_dir_path) and (os.path.basename(parent_dir_path) == 'c_generated_code'):
+            shutil.rmtree(parent_dir_path)

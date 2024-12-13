@@ -8,12 +8,12 @@ import json
 from pathlib import Path
 from typing import Dict, List, Union 
 
-class Configs:
+class ConFiGS:
     """
     Class to handle the configuration of parameters data.
     """
     # Pre-define the configs dictionary format
-    configs: Dict[str,Union[Path,Dict[str,Union[str,float,List[float]]]]]
+    configs: Dict[str,Union[Path,Dict[str,Union[str,float,List[float],Dict[str,Union[int,float]]]]]]
 
     def __init__(self,
                  gsplat_config:str='scene003',
@@ -21,6 +21,7 @@ class Configs:
                  mpc_config:str='flightroom', 
                  drone_config:str='carl',
                  control_config:str='body_rate_v1',
+                 flying_config:str='alpha',
                  configs_path:Path=None,
                  gsplats_path:Path=None):
         """
@@ -38,6 +39,7 @@ class Configs:
             - mpc_config:     Name of the JSON file containing the MPC parameters.
             - drone_config:   Name of the JSON file containing the drone parameters.
             - control_config: Name of the JSON file containing the control parameters.
+            - flying_config:  Name of the JSON file containing the flying parameters.
             - configs_path:   Path to the directory containing the JSON files.
             - gsplats_path:   Path to the directory containing the gsplats.
 
@@ -63,12 +65,16 @@ class Configs:
         self.configs = {}
 
         # Add the default configurations
-        self.add_config('gaussian_splat',gsplat_config)
-        self.add_config('fout_waypoints', fout_config)
-        self.add_config('mpc_parameters', mpc_config)
-        self.add_config('drone_parameters', drone_config)
-        self.add_config('control_parameters', control_config)
+        self.add_config("gaussian_splat",gsplat_config)
+        self.add_config("fout_waypoints", fout_config)
+        self.add_config("mpc_parameters", mpc_config)
+        self.add_config("drone_parameters", drone_config)
+        self.add_config("control_parameters", control_config)
+        self.add_config("flying_parameters", flying_config)
 
+        # Print the configurations
+        self.list_configs()
+        
     def add_config(self, key:str, value:str):
         """
         Add a configuration to the dictionary. The configuration is loaded from
@@ -81,7 +87,7 @@ class Configs:
 
         # Load the configuration from the relevant config directory
         if key == 'gaussian_splat':
-            config = self.load_yaml(value)
+            config = self.load_path(value)
         else:
             config = self.load_json(key,value)
 
@@ -138,9 +144,9 @@ class Configs:
         
         return self.configs[key]
     
-    def load_yaml(self, name:str):
+    def load_path(self, name:str):
         """
-        Load a yaml from the gsplats directory.
+        Load a yaml from the gsplats directory and give it a name.
 
         Args:
             - key:         Key to load the parameters for.
@@ -162,7 +168,7 @@ class Configs:
 
     def load_json(self, key:str, value:str):
         """
-        Load a json from the configs directory.
+        Load a json from the configs directory and give it a name.
         
         Args:
             - key:         Key to load the parameters for.
@@ -176,8 +182,12 @@ class Configs:
         if not json_config.exists():
             raise ValueError(f"The json file '{json_config}' does not exist.")
         else:
+            # Load the json configuration
             with open(json_config) as file:
                 config = json.load(file)
+            
+            # Add the name to the configuration
+            config["name"] = value
 
         return config
 
