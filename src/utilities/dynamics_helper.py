@@ -7,7 +7,7 @@ from typing import Dict,Union
 
 def generate_specifications(
         drn_prms:Dict[str,Union[float,np.ndarray]],
-        name:str='the_shepherd') -> Dict["str",Union[float,np.ndarray]]:
+        name:str='the_shepherd',nx:int=10,nu:int=4) -> Dict["str",Union[float,np.ndarray]]:
     """
     Generate a dictionary with the full drone specifications.
     
@@ -72,9 +72,7 @@ def generate_specifications(
     quad["fn"],quad["tg"] = fn, tG
 
     # Model Constants
-    quad["nx_fs"],quad["nu_fs"] = 13,4
-    quad["nx_br"],quad["nu_br"] = 10,4
-    quad["nu_va"] = 5
+    quad["nx"],quad["nu"] = nx,nu
     quad["n_rtr"] = n_rtr
     quad["T_c2b"] = np.array(T_c2b)
     quad["camera"] = camera
@@ -89,7 +87,7 @@ def generate_specifications(
     quad["Iinv"] = np.diag(1/(m*np.array(Impp)))
     quad["fMw"] = fMw
     quad["wMf"] = np.linalg.inv(fMw)
-    quad["tn"] = quad["fn"]*quad["nu_fs"]
+    quad["tn"] = fn*n_rtr
 
     # name
     quad["name"] = name

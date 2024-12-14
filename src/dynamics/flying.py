@@ -31,10 +31,10 @@ class Flying():
 
         # Extract the relevant configurations
         flying_config = config.get_config("flying_parameters")
+        drone_config  = config.get_config("drone_parameters")
 
         # Some useful intermediate variables
-        drn_prms = config.get_config("drone_parameters")
-        drn_spec = dh.generate_specifications(drn_prms)
+        drn_spec = dh.generate_specifications(drone_config)
         sim_json = 'acados_sim_nlp_'+name+'.json'
 
         sim = AcadosSim()
@@ -77,8 +77,8 @@ class Flying():
         ])
 
         # Extract sensor and model parameters
-        mu_md  = self.mu_md * (1/n_sim2ctl)         # Scale model mean noise to control rate
-        std_md = self.std_md * (1/n_sim2ctl)        # Scale model std noise to control rate
+        mu_md  = self.mu_md*(1/n_sim2ctl)         # Scale model mean noise to control rate
+        std_md = self.std_md*(1/n_sim2ctl)        # Scale model std noise to control rate
         mu_sn = 1.0*self.mu_sn
         std_sn = 1.0*self.std_sn
         Wf_sn,Wf_md = self.Wf,1-self.Wf

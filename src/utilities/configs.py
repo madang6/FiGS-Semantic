@@ -72,8 +72,8 @@ class ConFiGS:
         self.add_config("control_parameters", control_config)
         self.add_config("flying_parameters", flying_config)
 
-        # Print the configurations
-        self.list_configs()
+        # # Print the configurations
+        # self.list_configs()
         
     def add_config(self, key:str, value:str):
         """

@@ -71,7 +71,7 @@ def export_quadcopter_ode_model(m:float,tn:float) -> AcadosModel:
                 V2
                 )
     
-    f_impl = xdot - f_expl
+    f_impl = xdot-f_expl
 
     # Pack into acados model
     model = AcadosModel()

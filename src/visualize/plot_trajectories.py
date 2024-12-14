@@ -31,7 +31,6 @@ def plot_tXU_spatial(tXUs:Union[np.ndarray,List[np.ndarray]],
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-
     ax.set_xlim(tXU_lim[1,:])
     ax.set_ylim(tXU_lim[2,:])
     ax.set_zlim(tXU_lim[3,:])
@@ -114,12 +113,14 @@ def plot_tXU_time(tXUs:Union[np.ndarray,List[np.ndarray]]):
     plt.show(block=False)
 
 def get_plot_limits(tXUs:List[np.ndarray],use_aesthetics:bool=True,
-                    aesth_z:np.ndarray=np.array([0.0,-2.0]),
-                    aesth_margin:float=0.2):
+                    pz_aesth:np.ndarray=np.array([0.0,-2.0]),
+                    pxy_min_aesth:float=2.0,
+                    pq_aesth:np.ndarray=np.array([-1.0,1.0]),
+                    dx_aesth:float=0.2):
     """
     Get the plot limits for the trajectory. An aesthetic option is available
-    that tunes the z-axis limits and pads the other dimensions for for better
-    visualization.
+    that sets px and py to a minimum of -2m <-> 2m, locks pz to 0m <-> -2m, and sets
+    a margin on all states for better visualization.
 
     Args:
     - tXUs: List of tXU arrays.
@@ -145,9 +146,21 @@ def get_plot_limits(tXUs:List[np.ndarray],use_aesthetics:bool=True,
         tXU_lim[i,1] = np.ceil(np.max(tXU_max[i]))
 
     if use_aesthetics:
-        tXU_lim[1:,0] -= aesth_margin
-        tXU_lim[1:,1] += aesth_margin
-        tXU_lim[3,:] = aesth_z
+        # Limit the plot to a minimum of -2m <-> 2m for px and py
+        for i in range(2):
+            tXU_lim[i+1,0] = np.min([tXU_lim[i+1,0],-pxy_min_aesth])
+            tXU_lim[i+1,1] = np.max([tXU_lim[i+1,1],pxy_min_aesth])
+        
+        # Lock pz to 0m <-> -2m
+        tXU_lim[3,:] = pz_aesth
+
+        # Lock q to -1 <-> 1
+        tXU_lim[7:11,0] = pq_aesth[0]
+        tXU_lim[7:11,1] = pq_aesth[1]
+
+        # Set a margin on all states for better visualization
+        tXU_lim[1:,0] -= dx_aesth
+        tXU_lim[1:,1] += dx_aesth
 
     return tXU_lim
 

@@ -1,6 +1,6 @@
 {  
     "simulation": {
-        "hz_sim": 100,
+        "hz_sim": 20,
         "delay": 0.0
     },
     "model_noise": {

@@ -9,7 +9,7 @@ import utilities.dynamics_helper as dh
 from utilities.configs import ConFiGS
 
 from controller.base_controller import BaseController
-from acados_template import AcadosOcp, AcadosOcpSolver
+from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
 from casadi import vertcat
 from dynamics.quadcopter_model import export_quadcopter_ode_model
 from typing import Union,Tuple,Dict
@@ -17,13 +17,14 @@ from copy import deepcopy
 import visualize.plot_trajectories as pt
 
 class VehicleRateMPC(BaseController):
-    def __init__(self, config:ConFiGS, name:str="vrmpc") -> None:
+    def __init__(self, config:ConFiGS, use_RTI:bool=False, name:str="vrmpc") -> None:
         
         """
         Constructor for the VehicleRateMPC class.
         
         Args:
             - config: FiGS configuration dictionary.
+            - use_RTI: Use RTI flag.
             - name:   Name of the policy.
 
         Variables:
@@ -63,13 +64,13 @@ class VehicleRateMPC(BaseController):
         Ws = np.diag(mpc_prms["Ws"])
 
         # Control Parameters
-        hz_ctl,use_RTI,tpad= ctl_prms["hz"],ctl_prms["use_RTI"],ctl_prms["terminal_padding"]
+        hz_ctl= ctl_prms["hz"]
         lbu,ubu = np.array(ctl_prms["bounds"]["lower"]),np.array(ctl_prms["bounds"]["upper"])
 
         # Derived Parameters
         traj_config_pd = self.pad_trajectory(fout_wps,Nhn,hz_ctl)
         drn_spec = dh.generate_specifications(drn_prms)
-        nx,nu = drn_spec["nx_br"], drn_spec["nu_br"]
+        nx,nu = drn_spec["nx"], drn_spec["nu"]
 
         ny,ny_e = nx+nu,nx
         solver_json = 'acados_ocp_nlp_'+name+'.json'
@@ -87,6 +88,8 @@ class VehicleRateMPC(BaseController):
         
         # Convert to desired tXU
         tXUd = th.TS_to_tXU(Tpi,CPi,drn_spec,hz_ctl)
+        # pt.plot_tXU_spatial(tXUd)
+        # pt.plot_tXU_time(tXUd)
 
         # =====================================================================
         # Setup Acados Variables
@@ -94,7 +97,6 @@ class VehicleRateMPC(BaseController):
 
         # Initialize Acados OCP
         ocp = AcadosOcp()
-        ocp.dims.N = Nhn
 
         ocp.model = export_quadcopter_ode_model(drn_spec["m"],drn_spec["tn"])        
         ocp.model.cost_y_expr = vertcat(ocp.model.x, ocp.model.u)
@@ -105,7 +107,6 @@ class VehicleRateMPC(BaseController):
 
         ocp.cost.W = scipy.linalg.block_diag(Qk,Rk)
         ocp.cost.W_e = QN
-
         ocp.cost.yref = np.zeros((ny,))
         ocp.cost.yref_e = np.zeros((ny_e, ))
 
@@ -115,6 +116,7 @@ class VehicleRateMPC(BaseController):
         ocp.constraints.idxbu = np.array([0, 1, 2, 3])
 
         # Initialize Acados Solver
+        ocp.solver_options.N_horizon = Nhn
         ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
         ocp.solver_options.hessian_approx = 'EXACT'
         ocp.solver_options.integrator_type = 'IRK'
@@ -140,7 +142,7 @@ class VehicleRateMPC(BaseController):
 
         # Controller Specific Variables
         self.Nx,self.Nu = nx,nu
-        self.tXUd = tXUd
+        self.tXUd = 1.0*tXUd
         self.Qk,self.Rk,self.QN = Qk,Rk,QN
         self.Ws = Ws
         self.lbu,self.ubu = lbu,ubu
@@ -158,7 +160,7 @@ class VehicleRateMPC(BaseController):
         
         for _ in range(5):
             self.control(0.0,tXUd[1:11,0])
-
+            
     def control(self,
                 tcr:float,xcr:np.ndarray,
                 upr:np.ndarray=None,
@@ -199,7 +201,7 @@ class VehicleRateMPC(BaseController):
         for i in range(self.solver.acados_ocp.dims.N):
             self.solver.cost_set(i, "yref", ydes[:,i])
         self.solver.cost_set(self.solver.acados_ocp.dims.N, "yref", ydes[0:10,-1])
-        
+
         # Solve OCP
         t1 = time.time()
         if self.use_RTI:
@@ -249,7 +251,7 @@ class VehicleRateMPC(BaseController):
         kff = list(fout_wps["keyframes"])[-1]
         
         # Pad trajectory
-        t_pd = fout_wps["keyframes"][kff]["t"]+((Nhn+1)/hz_ctl)
+        t_pd = fout_wps["keyframes"][kff]["t"]+(Nhn/hz_ctl)
         fo_pd = np.array(fout_wps["keyframes"][kff]["fo"])[:,0:3].tolist()
 
         fout_wps_pd = deepcopy(fout_wps)
@@ -273,31 +275,37 @@ class VehicleRateMPC(BaseController):
         """
         # Get relevant portion of trajectory
         idx_i = int(self.hz*ti)
-        ks0 = np.clip(idx_i-self.ns,0,self.tXUd.shape[1]-1)
-        ksf = np.min([idx_i+self.ns,self.tXUd.shape[1]])
-        xi = self.tXUd[1:11,ks0:ksf]
-
+        Nhn_lim = self.tXUd.shape[1]-self.solver.acados_ocp.dims.N-1
+        ks0 = np.clip(idx_i-self.ns,0,Nhn_lim-1)
+        ksf = np.clip(idx_i+self.ns,0,Nhn_lim)
+        Xi = self.tXUd[1:11,ks0:ksf]
+        
         # Find index of nearest state
-        dx = xi-xcr.reshape(-1,1)
-        idx0 = ks0 + np.argmin(self.Ws.T@dx**2)
+        dXi = Xi-xcr.reshape(-1,1)
+        wl2_dXi = np.array([x.T@self.Ws@x for x in dXi.T])
+        idx0 = ks0 + np.argmin(wl2_dXi)
         idxf = idx0 + self.solver.acados_ocp.dims.N+1
 
         # Pad if idxf is greater than the last index
         if idxf < self.tXUd.shape[1]:
-            xdes = self.tXUd[1:11,idx0:idxf]
-            udes = self.tXUd[11:15,idx0:idxf]
-            
-            ydes = np.vstack((xdes,udes))
+            ydes = self.tXUd[1:,idx0:idxf]
         else:
             print("Warning: VehicleRateMPC.get_ydes() padding trajectory. Increase your padding horizon.")
-            xdes = self.tXUd[1:11,idx0:]
-            udes = self.tXUd[11:15,idx0:]
-
-            ydes = np.vstack((xdes,udes))
+            ydes = self.tXUd[1:,idx0:]
             ydes = np.hstack((ydes,np.tile(ydes[:,-1:],(1,idxf-self.tXUd.shape[1]))))
 
         return ydes
     
+    def generate_simulator(self,hz):
+        sim = AcadosSim()
+        sim.model = self.model
+        sim.solver_options.T = 1/hz
+        sim.solver_options.integrator_type = 'IRK'
+
+        sim_json = 'acados_sim_nlp.json'
+        self.sim_json_file = os.path.join(os.path.dirname(self.code_export_path),sim_json)
+
+        return AcadosSimSolver(sim,json_file=sim_json,verbose=False)
     def clear_generated_code(self):
         """
         Method to clear the generated code and files to ensure the code is recompiled correctly each time.
