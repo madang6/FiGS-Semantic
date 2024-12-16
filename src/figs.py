@@ -117,7 +117,6 @@ class FiGS:
         Lists the currently loaded configurations.
         """
         components = list(self.conFiGS.keys())
-        Nstr = max([len(component) for component in components])
 
         print("="*Npad)
         print("Currently Loaded Configs:")

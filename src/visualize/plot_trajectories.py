@@ -1,20 +1,19 @@
 import numpy as np
-import torch
-import os
-import pickle
-from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
-from typing import List,Tuple
-import utilities.trajectory_helper as th
-from typing import Dict,Union,Tuple,List
+
+from scipy.spatial.transform import Rotation as R
+from typing import List
+from typing import Union,List
 
 def plot_tXU_spatial(tXUs:Union[np.ndarray,List[np.ndarray]],
-                     n_fr:int=None):
+                     n_fr:int=None) -> None:
     """
     Plot the spatial trajectory.
 
     Args:
-    - tXUs: List of tXU arrays.
+        - tXUs: List of tXU arrays or a single tXU array.
+        - n_fr: Number of steps between plots of the quadcopter frame.
+
     """
 
     # Some useful constants
@@ -54,12 +53,12 @@ def plot_tXU_spatial(tXUs:Union[np.ndarray,List[np.ndarray]],
 
     plt.show(block=False)
 
-def plot_tXU_time(tXUs:Union[np.ndarray,List[np.ndarray]]):
+def plot_tXU_time(tXUs:Union[np.ndarray,List[np.ndarray]]) -> None:
     """
     Plot the time trajectory.
 
     Args:
-    - tXUs: List of tXU arrays.
+        - tXUs: List of tXU arrays or a single tXU array.
     """
 
     # Some useful constants
@@ -116,17 +115,23 @@ def get_plot_limits(tXUs:List[np.ndarray],use_aesthetics:bool=True,
                     pz_aesth:np.ndarray=np.array([0.0,-2.0]),
                     pxy_min_aesth:float=2.0,
                     pq_aesth:np.ndarray=np.array([-1.0,1.0]),
-                    dx_aesth:float=0.2):
+                    dx_aesth:float=0.2) -> np.ndarray:
     """
     Get the plot limits for the trajectory. An aesthetic option is available
     that sets px and py to a minimum of -2m <-> 2m, locks pz to 0m <-> -2m, and sets
     a margin on all states for better visualization.
 
     Args:
-    - tXUs: List of tXU arrays.
+        - tXUs: List of tXU arrays or a single tXU array.
+        - use_aesthetics: Use aesthetic limits.
+        - pz_aesth: Aesthetic limits for pz.
+        - pxy_min_aesth: Aesthetic limits for px and py.
+        - pq_aesth: Aesthetic limits for q.
+        - dx_aesth: Aesthetic margin for all states.
 
     Returns:
-    - tXU_lim: Plot limits.
+        - tXU_lim: Plot limits.
+
     """
 
     # Initialize the plot limits
@@ -165,18 +170,20 @@ def get_plot_limits(tXUs:List[np.ndarray],use_aesthetics:bool=True,
     return tXU_lim
 
 def quad_frame(x:np.ndarray,ax:plt.Axes,scale:float=1.0,
-               quad_dims:np.ndarray=np.diag([0.6,0.6,-0.2])):
+               dims:np.ndarray=np.diag([0.6,0.6,-0.2])) -> None:
     """
     Plot a quadcopter frame in 3D.
 
     Args:
-    - x:         State vector.
-    - ax:        Axes object.
-    - scale:     Scale factor.
-    - quad_dims: Quadcopter dimensions.
+        - x:     State vector.
+        - ax:    Axes object.
+        - scale: Scale factor.
+        - dims:  Quadcopter dimensions.
+
+
     """
 
-    frame_body = scale*quad_dims
+    frame_body = scale*dims
     frame_labels = ["red","green","blue"]
     pos  = x[0:3]
     quat = x[6:10]

@@ -4,19 +4,20 @@ Helper functions for trajectory data.
 
 import numpy as np
 import math
+
 from scipy.spatial.transform import Rotation
 from typing import Dict,Union
 
-def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]]):
+def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]])  -> np.ndarray:
     """
     Converts a flat output vector to a state vector and body-rate command.
 
     Args:
-        fo:     Flat output vector.
-        quad:   Quadcopter configuration.
+        - fo:     Flat output array.
+        - quad:   Quadcopter specifications.
 
     Returns:
-        xut:    State vector and control input.
+        - xu:    State vector and control input.
     """
 
     # Unpack
@@ -28,7 +29,7 @@ def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]]):
     psit  = fo[3,0]
     psidt = fo[3,1]
 
-    m,k_th,n_mtr = quad["m"],quad["fn"],quad["n_rtr"]
+    m,tn = quad["m"],quad["tn"]
 
     # Compute Gravity
     gt = np.array([0.00,0.00,-9.81])
@@ -67,50 +68,50 @@ def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]]):
     wt = np.array([wxt,wyt,wzt])
 
     # Compute Body-Rate Command
-    ut = np.hstack((m*c/(k_th*n_mtr),wt))
+    ut = np.hstack((m*c/tn,wt))
     
     # Stack
-    xut = np.hstack((pt,vt,qt,ut))
+    xu = np.hstack((pt,vt,qt,ut))
 
-    return xut
+    return xu
 
-def ts_to_fo(tk:float,Tp:float,CP:np.ndarray) -> np.ndarray:
+def ts_to_fo(tcr:float,Tp:float,CP:np.ndarray) -> np.ndarray:
     """
     Converts a trajectory spline (defined by Tp,CP) to a flat output.
 
     Args:
-        tk:     Current time.
-        Tp:     Trajectory segment final time.
-        CP:     Control points.
+        - tcr: Current time.
+        - Tp:  Trajectory segment final time.
+        - CP:  Control points.
 
     Returns:
-        fo:     Flat output vector.
+        - fo:  Flat output vector.
     """
     Ncp = CP.shape[1]
     M = get_M(Ncp)
 
     fo = np.zeros((4,Ncp))
     for i in range(0,Ncp):
-        nt = get_nt(tk,Tp,i,Ncp)
+        nt = get_nt(tcr,Tp,i,Ncp)
         fo[:,i] = (CP @ M @ nt) / (Tp**i)
 
     return fo
 
-def ts_to_xu(tk:float,Tp:float,CP:np.ndarray,
+def ts_to_xu(tcr:float,Tp:float,CP:np.ndarray,
              quad:Dict[str,Union[float,np.ndarray]]) -> np.ndarray:
     """
     Converts a trajectory spline (defined by tf,CP) to a state vector and control input.
 
     Args:
-        tk:     Current segment time.
-        Tp:     Trajectory segment final time.
-        CP:     Control points.
-        quad:   Quadcopter configuration.
+        tcr:  Current segment time.
+        Tp:   Trajectory segment final time.
+        CP:   Control points.
+        quad: Quadcopter specifications.
 
     Returns:
         xu:    State vector and control input.
     """
-    fo = ts_to_fo(tk,Tp,CP)
+    fo = ts_to_fo(tcr,Tp,CP)
     return fo_to_xu(fo,quad)
 
 def TS_to_tXU(Tps:np.ndarray,CPs:np.ndarray,
@@ -121,13 +122,13 @@ def TS_to_tXU(Tps:np.ndarray,CPs:np.ndarray,
     rollout.
 
     Args:
-        Tps:     Trajectory segment times.
-        CPs:     Trajectory control points.
-        quad:   Quadcopter configuration.
-        hz:     Control loop frequency.
+        - Tps:  Trajectory segment times.
+        - CPs:  Trajectory control points.
+        - quad: Quadcopter specifications.
+        - hz:   Control loop frequency.
 
     Returns:
-        tXU:    State vector and control input rollout.
+        - tXU:  State vector and control input rollout.
     """
     Nt = int((Tps[-1]-Tps[0])*hz+1)
 
@@ -153,18 +154,18 @@ def TS_to_tXU(Tps:np.ndarray,CPs:np.ndarray,
 
     return tXU
 
-def get_nt(tk:float,tf:float,kd:int,Ncp:int):  
+def get_nt(tk:float,tf:float,kd:int,Ncp:int) -> np.ndarray:  
     """
     Generates the normalized time vector based on desired derivative order.
 
     Args:
-        tk:     Current time on segment.
-        tf:     Segment final time.
-        kd:     Derivative order.
-        Ncp:    Number of control points.
+        - tk:     Current time on segment.
+        - tf:     Segment final time.
+        - kd:     Derivative order.
+        - Ncp:    Number of control points.
 
     Returns:
-        nt:      the normalized time vector.
+        - nt:      the normalized time vector.
     """
 
     tn = tk/tf
@@ -176,12 +177,15 @@ def get_nt(tk:float,tf:float,kd:int,Ncp:int):
     
     return nt
 
-def get_M(Ncp:int):
+def get_M(Ncp:int) -> np.ndarray:
     """
     Generates the M matrix for polynomial interpolation.
 
+    Args:
+        - Ncp:    Number of control points.
+
     Returns:
-        M:      Polynomial interpolation matrix.
+        - M:      Polynomial interpolation matrix.
     """
     M = np.zeros((Ncp,Ncp))
     for i in range(Ncp):
@@ -192,20 +196,20 @@ def get_M(Ncp:int):
 
     return M
 
-def obedient_quaternion(qcr:np.ndarray,qpr:np.ndarray) -> np.ndarray:
+def obedient_quaternion(qcr:np.ndarray,qrf:np.ndarray) -> np.ndarray:
     """
     Ensure that the quaternion is well-behaved (unit norm and closest to reference).
     
     Args:
-        qcr:    Current quaternion.
-        qpr:    Previous quaternion.
+        - qcr:    Current quaternion.
+        - qrf:    Previous quaternion.
 
     Returns:
-        qcr:     Closest quaternion to reference.
+        - qcr:     Closest quaternion to reference.
     """
     qcr = qcr/np.linalg.norm(qcr)
 
-    if np.dot(qcr,qpr) < 0:
+    if np.dot(qcr,qrf) < 0:
         qcr = -qcr
 
     return qcr
@@ -215,10 +219,10 @@ def xv_to_T(xcr:np.ndarray) -> np.ndarray:
     Converts a state vector to a transfrom matrix.
 
     Args:
-        xcr:    State vector.
+        - xcr:    State vector.
 
     Returns:
-        Tcr:    Pose matrix.
+        - Tcr:    Pose matrix.
     """
     Tcr = np.eye(4)
     Tcr[0:3,0:3] = Rotation.from_quat(xcr[6:10]).as_matrix()

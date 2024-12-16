@@ -3,13 +3,13 @@ import torch
 import shutil
 import os
 import utilities.trajectory_helper as th
-import utilities.dynamics_helper as dh
 
-from typing import Dict,List,Type,Union,Literal
+from typing import Dict,List,Type,Union
 from control.base_controller import BaseController
 from render.gsplat import GSplat
 from acados_template import AcadosSimSolver, AcadosSim
-from dynamics.quadcopter_model import export_quadcopter_ode_model
+from dynamics.model_equations import export_quadcopter_ode_model
+from dynamics.model_specifications import generate_specifications
 
 class Flight():
     def __init__(self, rollout_config:Dict[str,Union[int,float,List[float]]],
@@ -18,14 +18,30 @@ class Flight():
         Flying class for simulating drone flights.
 
         Args:
-        - config: FiGS configuration dictionary.
+            - rollout_config: Configuration dictionary for the rollout.
+            - frame_config: Configuration dictionary for the frame.
+            - name: Name of the flight.
 
         Variables:
+            - nx: Number of states in the system.
+            - nu: Number of controls in the system.
+            - hz_sim: Simulation rate.
+            - t_dly: Delay in control.
+            - mu_md: Mean of the model noise.
+            - std_md: Standard deviation of the model noise.
+            - mu_sn: Mean of the sensor noise.
+            - std_sn: Standard deviation of the sensor noise.
+            - use_fusion: Use sensor model fusion.
+            - Wf: Fusion weights.
+            - drn_spec: Drone specifications.
+            - simulator: Acados simulator.
+            - code_export_path: Path to the generated code.
+            - simulator_path: Path to the simulator json file.
         
         """
 
         # Some useful intermediate variables
-        drn_spec = dh.generate_specifications(frame_config)
+        drn_spec = generate_specifications(frame_config)
         sim_json = 'acados_sim_nlp_'+name+'.json'
 
         sim = AcadosSim()
@@ -44,6 +60,7 @@ class Flight():
         self.std_sn = np.array(rollout_config["sensor_noise"]["std"])
         self.use_fusion = rollout_config["sensor_model_fusion"]["use_fusion"]
         self.Wf = np.diag(rollout_config["sensor_model_fusion"]["weights"])
+        self.drn_spec = drn_spec
         self.simulator = AcadosSimSolver(sim, json_file=sim_json, verbose=False)
         
         self.code_export_path = sim.code_export_directory
@@ -52,6 +69,26 @@ class Flight():
     def simulate(self,controller:Type[BaseController],gsplat:GSplat,
                  t0:float,tf:int,x0:np.ndarray,
                  obj:Union[None,np.ndarray]=None):
+        """
+        Method to simulate the drone flight.
+
+        Args:
+            - controller: Controller for the drone.
+            - gsplat: GSplat object for rendering images.
+            - t0: Initial time.
+            - tf: Final time.
+            - x0: Initial state.
+            - obj: Object to track.
+
+        Returns:
+            - Tro: Time vector.
+            - Xro: State vector.
+            - Uro: Control vector.
+            - Iro: Image vector.
+            - Tsol: Solution time vector.
+            - Adv: Advisor vector (if used).
+
+        """
         
         # Simulation Variables
         dt = np.round(tf-t0)
@@ -60,12 +97,7 @@ class Flight():
         n_sim2ctl = int(self.hz_sim/controller.hz)
         n_delay = int(self.t_dly*self.hz_sim)
         height,width,channels = int(gsplat.camera_out.height.item()),int(gsplat.camera_out.width.item()),3
-        T_c2b = np.array([
-            [-0.00866, -0.12186, -0.99250,  0.10000],
-            [ 0.99938, -0.03463, -0.00446, -0.03100],
-            [-0.03383, -0.99194,  0.12209, -0.01200],
-            [ 0.00000,  0.00000,  0.00000,  1.00000]
-        ])
+        T_c2b = self.drn_spec["T_c2b"]
 
         # Extract sensor and model parameters
         mu_md  = self.mu_md*(1/n_sim2ctl)         # Scale model mean noise to control rate
@@ -76,7 +108,7 @@ class Flight():
 
         # Rollout Variables
         Tro,Xro,Uro = np.zeros(Nctl+1),np.zeros((self.nx,Nctl+1)),np.zeros((self.nu,Nctl))
-        Imgs = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
+        Iro = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
         Xro[:,0] = x0
 
         # Diagnostics Variables
@@ -85,7 +117,7 @@ class Flight():
         
         # Transient Variables
         xcr,xpr,xsn = x0.copy(),x0.copy(),x0.copy()
-        ucm = np.array([-0.5,0.0,0.0,0.0])
+        ucm = np.array([-self.drn_spec['m']/self.drn_spec['tn'],0.0,0.0,0.0])
         udl = np.hstack((ucm.reshape(-1,1),ucm.reshape(-1,1)))
         zcr = torch.zeros(controller.nzcr) if isinstance(controller.nzcr, int) else None
 
@@ -135,7 +167,7 @@ class Flight():
             if i % n_sim2ctl == 0:
                 k = i//n_sim2ctl
 
-                Imgs[k,:,:,:] = icr
+                Iro[k,:,:,:] = icr
                 Tro[k] = tcr
                 Xro[:,k+1] = xcr
                 Uro[:,k] = ucm
@@ -145,7 +177,7 @@ class Flight():
         # Log final time
         Tro[Nctl] = t0+Nsim/self.hz_sim
 
-        return Tro,Xro,Uro,Imgs,Tsol,Adv
+        return Tro,Xro,Uro,Iro,Tsol,Adv
     
     def clear_generated_code(self):
         """

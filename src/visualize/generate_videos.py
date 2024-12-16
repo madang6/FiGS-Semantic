@@ -1,14 +1,14 @@
 import imageio
 import numpy as np
 
-def images_to_mp4(images:np.ndarray, output_filename, fps):
+def images_to_mp4(images:np.ndarray, filename:str, fps:int):
     """
     Convert an array of images (B, H, W, C) in uint8 format into an MP4 video using imageio.
 
     Args:
-        images (np.ndarray): A numpy array of shape (B, H, W, C) with uint8 type.
-        output_filename (str): The output MP4 filename.
-        fps (int): Frames per second for the video.
+        - images:   A numpy array of shape (B, H, W, C) with uint8 type.
+        - filename: The output MP4 filename.
+        - fps:      Frames per second for the video.
     """
     # Validate input
     assert len(images.shape) == 4, "Input array must have shape (B, H, W, C)"
@@ -20,6 +20,6 @@ def images_to_mp4(images:np.ndarray, output_filename, fps):
         images = np.repeat(images, 3, axis=-1)
 
     # Write video using imageio
-    with imageio.get_writer(output_filename, format='FFMPEG', mode='I', fps=fps) as writer:
+    with imageio.get_writer(filename, format='FFMPEG', mode='I', fps=fps) as writer:
         for frame in images:
             writer.append_data(frame)

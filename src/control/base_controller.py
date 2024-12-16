@@ -1,9 +1,10 @@
-from abc import ABC, abstractmethod
 import numpy as np
 import torch
-from typing import Dict,List,Union
-from pathlib import Path
 import json
+
+from pathlib import Path
+from abc import ABC, abstractmethod
+from typing import Dict,Union,Tuple
 
 class BaseController(ABC):
     """
@@ -13,8 +14,10 @@ class BaseController(ABC):
         control(**inputs): Abstract method to be implemented by subclasses.
     
     Attributes:
-        hz:      Frequency of the controller.
-        nzcr:    Number of states in the controller.
+        configs_path:   Path to the directory containing the JSON files.
+        hz:             Frequency of the controller.
+        nzcr:           Number of states in the controller.
+
     """
     def __init__(self,configs_path:Path=None) -> None:
         """
@@ -22,6 +25,7 @@ class BaseController(ABC):
 
         Args:
             configs_path: Path to the directory containing the JSON files.
+
         """
         # Set the configuration directory
         if configs_path is None:
@@ -34,20 +38,43 @@ class BaseController(ABC):
         self.nzcr = None
 
     @abstractmethod
-    def control(self, tcr:float,xcr:np.ndarray,
-                upr:Union[None,np.ndarray],
-                obj:Union[None,np.ndarray],
-                icr:Union[None,np.ndarray],zcr:Union[None,torch.Tensor]):
+    def control(self, tcr: float, xcr: np.ndarray,
+                upr: Union[None, np.ndarray],
+                obj: Union[None, np.ndarray],
+                icr: Union[None, np.ndarray],
+                zcr: Union[None, torch.Tensor]
+                ) -> Tuple[np.ndarray, Union[None, torch.Tensor], Union[None, np.ndarray], np.ndarray]:
         """
         Abstract control method to be implemented by subclasses.
+
         Args:
-            **inputs: Key-value pairs representing the inputs.
+            tcr: Time at the current control step.
+            xcr: States at the current control step.
+            upr: Previous control step inputs (if any, None otherwise).
+            obj: Objective vector (if any, None otherwise).
+            icr: Image at the current control step (if any, None otherwise).
+            zcr: Feature vector at current control step (if any, None otherwise).
+
+        Returns:
+            ucr: Control input.
+            zcr: Output feature vector (if any, None otherwise).
+            adv: Advisor output (if any, None otherwise).
+            tsol: Time taken to solve components.
+
         """
         pass
 
-    def load_json_config(self, config:str, name:str):
+    def load_json_config(self, config:str, name:str) -> Dict:
         """
+        Load a JSON configuration file.
 
+        Args:
+            config: Name of the configuration directory.
+            name: Name of the configuration file.
+
+        Returns:
+            config: Dictionary containing the configuration.
+        
         """
         json_config = self.configs_path/config/(name+".json")
 

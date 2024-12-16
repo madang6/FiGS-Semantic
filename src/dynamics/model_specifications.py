@@ -1,19 +1,20 @@
-"""
-Helper functions for handling drone dynamics.
-"""
-
 import numpy as np
 from typing import Dict,Union
 
 def generate_specifications(
         drn_prms:Dict[str,Union[float,np.ndarray]],
-        name:str='the_shepherd',nx:int=10,nu:int=4) -> Dict["str",Union[float,np.ndarray]]:
+        name:str='the_shepherd',nx:int=10,nu:int=4
+        ) -> Dict["str",Union[str,int,float,np.ndarray]]:
     """
-    Generate a dictionary with the full drone specifications.
+    Generate a dictionary with the full drone specifications. Some drone specifications are derived
+    from input parameters but are queried frequently. To save computation time, they are precomputed
+    and stored in the dictionary.
     
     Args:
         drn_prms:       Dictionary containing the drone parameters.
         name:           Name of the quadcopter.
+        nx:             Number of states in the system.
+        nu:             Number of inputs in the system.
 
     Variable Constants:
         - m: Mass of the quadcopter (kg)

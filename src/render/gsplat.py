@@ -1,9 +1,10 @@
 import numpy as np
 import torch
+
 from pathlib import Path
-from typing import Dict, List, Union 
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.utils.eval_utils import eval_setup
+from typing import Dict, List, Union 
 
 class GSplat():
     def __init__(self, scene_config:Dict[str,Union[str,Path]],
@@ -12,15 +13,15 @@ class GSplat():
         GSplat class for rendering images from GSplat pipeline.
 
         Args:
-        - scene_config: FiGS scene configuration dictionary.
-        - frame_config: FiGS frame configuration dictionary.
+            - scene_config: FiGS scene configuration dictionary.
+            - frame_config: FiGS frame configuration dictionary.
 
         Variables:
-        - device: Device to run the pipeline on.
-        - config: Configuration for the pipeline.
-        - pipeline: Pipeline for the GSplat model.
-        - camera_out: Output camera for the pipeline.
-        - T_w2g: Transformation matrix from world to GSplat frame.
+            - device: Device to run the pipeline on.
+            - config: Configuration for the pipeline.
+            - pipeline: Pipeline for the GSplat model.
+            - camera_out: Output camera for the pipeline.
+            - T_w2g: Transformation matrix from world to GSplat frame.
 
         """
 
@@ -48,15 +49,15 @@ class GSplat():
         when it is set to out 640x360 resolution.
 
         Args:
-        - width: Width of the output image.
-        - height: Height of the output image.
-        - fx: Focal length in the x direction.
-        - fy: Focal length in the y direction.
-        - cx: Principal point in the x direction.
-        - cy: Principal point in the y direction.
+            - width: Width of the output image.
+            - height: Height of the output image.
+            - fx: Focal length in the x direction.
+            - fy: Focal length in the y direction.
+            - cx: Principal point in the x direction.
+            - cy: Principal point in the y direction.
 
         Returns:
-        - camera_out: Output camera for the pipeline.
+            - camera_out: Output camera for the pipeline.
             
         """
 
@@ -74,15 +75,15 @@ class GSplat():
 
         return camera_out
             
-    def render_rgb(self, T_c2w:np.ndarray) -> torch.Tensor:
+    def render_rgb(self, T_c2w:np.ndarray) -> np.ndarray:
         """
         Render an RGB image from the GSplat pipeline.
 
         Args:
-        - T_c2w: Transformation matrix from camera to world frame.
+            - T_c2w: Transformation matrix from camera to world frame.
 
         Returns:
-        - image_rgb: Rendered RGB image.
+            - image_rgb: Rendered RGB image.
 
         """
 

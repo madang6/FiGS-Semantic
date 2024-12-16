@@ -5,16 +5,15 @@ import numpy as np
 import scipy.linalg
 import tsplines.min_snap as ms
 import utilities.trajectory_helper as th
-import utilities.dynamics_helper as dh
-from pathlib import Path
 
-from control.base_controller import BaseController
-from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
-from casadi import vertcat
-from dynamics.quadcopter_model import export_quadcopter_ode_model
-from typing import Union,Tuple,Dict,List,Any
+from pathlib import Path
 from copy import deepcopy
-import visualize.plot_trajectories as pt
+from casadi import vertcat
+from acados_template import AcadosOcp, AcadosOcpSolver
+from control.base_controller import BaseController
+from dynamics.model_equations import export_quadcopter_ode_model
+from dynamics.model_specifications import generate_specifications
+from typing import Union, Tuple, Dict
 
 class VehicleRateMPC(BaseController):
     def __init__(self, 
@@ -80,7 +79,7 @@ class VehicleRateMPC(BaseController):
 
         # Derived Parameters
         traj_config_pd = self.pad_trajectory(course_config,Nhn,hz_ctl)
-        drn_spec = dh.generate_specifications(frame_config)
+        drn_spec = generate_specifications(frame_config)
         nx,nu = drn_spec["nx"], drn_spec["nu"]
 
         ny,ny_e = nx+nu,nx
@@ -187,18 +186,18 @@ class VehicleRateMPC(BaseController):
         outputs set to None.
 
         Args:
-        tcr:    Current time.
-        xcr:    Current state.
-        upr:    Previous control input (unused).
-        obj:    Objective (unused).
-        icr:    Current image (unused).
-        zcr:    Current image feature vector (unused).
+            - tcr: Time at the current control step.
+            - xcr: States at the current control step.
+            - upr: Previous control step inputs (unused).
+            - obj: Objective vector (unused).
+            - icr: Image at the current control step (unused).
+            - zcr: Feature vector at current control step (unused).
 
         Returns:
-        ucc:    Control input.
-        None:   Output feature vector (unused).
-        None:   Oracle output  (unused).
-        tsol:   Time taken to solve components [setup ocp, solve ocp, unused, unused].
+            - ucr:  Control input.
+            - zcr:  Output feature vector (unused).
+            - adv:  Advisor output (unused).
+            - tsol: Time taken to solve components [setup ocp, solve ocp, unused, unused].
 
         """
         # Unused arguments
@@ -208,7 +207,7 @@ class VehicleRateMPC(BaseController):
         t0 = time.time()
 
         # Get desired trajectory
-        ydes = self.get_ydes(xcr,tcr)
+        ydes = self.get_ydes(tcr,xcr)
 
         # Set desired trajectory
         for i in range(self.solver.acados_ocp.dims.N):
@@ -251,12 +250,12 @@ class VehicleRateMPC(BaseController):
         Method to pad the trajectory with the final waypoint so that the MPC horizon is satisfied at the end of the trajectory.
 
         Args:
-        fout_wps:   Dictionary containing the flat output waypoints.
-        Nhn:        Prediction horizon.
-        hz_ctl:     Controller frequency.
+            - fout_wps:   Dictionary containing the flat output waypoints.
+            - Nhn:        Prediction horizon.
+            - hz_ctl:     Controller frequency.
 
         Returns:
-        fout_wps_pd: Padded flat output waypoints.
+            - fout_wps_pd: Padded flat output waypoints.
 
         """
 
@@ -274,20 +273,20 @@ class VehicleRateMPC(BaseController):
 
         return fout_wps_pd
 
-    def get_ydes(self,xcr:np.ndarray,ti:float) -> np.ndarray:
+    def get_ydes(self,tcr:float,xcr:np.ndarray) -> np.ndarray:
         """
         Method to get the section of the desired trajectory at the current time.
 
         Args:
-        xcr:    Current state.
-        ti:     Current time.
+            - tcr: Time at the current control step.
+            - xcr: States at the current control step.
 
         Returns:
-        ydes:   Desired trajectory section at the current time.
+            - ydes:   Desired trajectory section at the current time.
 
         """
         # Get relevant portion of trajectory
-        idx_i = int(self.hz*ti)
+        idx_i = int(self.hz*tcr)
         Nhn_lim = self.tXUd.shape[1]-self.solver.acados_ocp.dims.N-1
         ks0 = np.clip(idx_i-self.ns,0,Nhn_lim-1)
         ksf = np.clip(idx_i+self.ns,0,Nhn_lim)
@@ -309,21 +308,14 @@ class VehicleRateMPC(BaseController):
 
         return ydes
     
-    def generate_simulator(self,hz):
-        sim = AcadosSim()
-        sim.model = self.model
-        sim.solver_options.T = 1/hz
-        sim.solver_options.integrator_type = 'IRK'
-
-        sim_json = 'acados_sim_nlp.json'
-        self.sim_json_file = os.path.join(os.path.dirname(self.code_export_path),sim_json)
-
-        return AcadosSimSolver(sim,json_file=sim_json,verbose=False)
     def clear_generated_code(self):
         """
         Method to clear the generated code and files to ensure the code is recompiled correctly each time.
+        Clears the folder too if it is empty.
+        
         """
 
+        # Clear the generated code
         try:
             os.remove(self.solver_path)
             shutil.rmtree(self.code_export_path)
