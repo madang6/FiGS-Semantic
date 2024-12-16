@@ -1,16 +1,19 @@
 import numpy as np
 import torch
-from utilities.configs import ConFiGS
+from pathlib import Path
+from typing import Dict, List, Union 
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.utils.eval_utils import eval_setup
 
-class SceneRender():
-    def __init__(self, config: ConFiGS) -> None:
+class GSplat():
+    def __init__(self, scene_config:Dict[str,Union[str,Path]],
+                 frame_config:Dict[str,Union[int,float,List[float]]]) -> None:
         """
-        SceneRender class for rendering images from GSplat pipeline.
+        GSplat class for rendering images from GSplat pipeline.
 
         Args:
-        - config: FiGS configuration dictionary.
+        - scene_config: FiGS scene configuration dictionary.
+        - frame_config: FiGS frame configuration dictionary.
 
         Variables:
         - device: Device to run the pipeline on.
@@ -20,15 +23,11 @@ class SceneRender():
         - T_w2g: Transformation matrix from world to GSplat frame.
 
         """
-        
-        # Extract the relevant configurations
-        gsplat_config = config.get_config("gaussian_splat")
-        drone_config  = config.get_config("drone_parameters")
 
         # Some useful intermediate variables
-        width,height = drone_config["camera"]["width"],drone_config["camera"]["height"]
-        fx,fy = drone_config["camera"]["fx"],drone_config["camera"]["fy"]
-        cx,cy = drone_config["camera"]["cx"],drone_config["camera"]["cy"]
+        width,height = frame_config["camera"]["width"],frame_config["camera"]["height"]
+        fx,fy = frame_config["camera"]["fx"],frame_config["camera"]["fy"]
+        cx,cy = frame_config["camera"]["cx"],frame_config["camera"]["cy"]
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         T_w2g = np.array([
             [ 1.00, 0.00, 0.00, 0.00],
@@ -39,7 +38,7 @@ class SceneRender():
 
         # Class variables
         self.device = device
-        self.config,self.pipeline, _, _ = eval_setup(gsplat_config["path"],test_mode="inference")
+        self.config,self.pipeline, _, _ = eval_setup(scene_config["path"],test_mode="inference")
         self.camera_out = self.generate_output_camera(width,height,fx,fy,cx,cy)
         self.T_w2g = T_w2g
 

@@ -2,23 +2,18 @@ import numpy as np
 import torch
 import shutil
 import os
-from utilities.configs import ConFiGS
 import utilities.trajectory_helper as th
 import utilities.dynamics_helper as dh
 
-from typing import List,Type,Union,Literal
-from controller.base_controller import BaseController
-from render.scene_render import SceneRender
-# import dynamics.quadcopter_config as qc
-# import synthesize.generate_data as gd
-# import visualize.record_flight as rf
-# from torchvision.io import write_video
-# from torchvision.transforms import Resize
-from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
+from typing import Dict,List,Type,Union,Literal
+from control.base_controller import BaseController
+from render.gsplat import GSplat
+from acados_template import AcadosSimSolver, AcadosSim
 from dynamics.quadcopter_model import export_quadcopter_ode_model
 
-class Flying():
-    def __init__(self, config:ConFiGS, name:str='flyer') -> None:
+class Flight():
+    def __init__(self, rollout_config:Dict[str,Union[int,float,List[float]]],
+                 frame_config:Dict[str,Union[int,float,List[float]]], name:str='flyer') -> None:
         """
         Flying class for simulating drone flights.
 
@@ -29,36 +24,32 @@ class Flying():
         
         """
 
-        # Extract the relevant configurations
-        flying_config = config.get_config("flying_parameters")
-        drone_config  = config.get_config("drone_parameters")
-
         # Some useful intermediate variables
-        drn_spec = dh.generate_specifications(drone_config)
+        drn_spec = dh.generate_specifications(frame_config)
         sim_json = 'acados_sim_nlp_'+name+'.json'
 
         sim = AcadosSim()
         sim.model = export_quadcopter_ode_model(drn_spec["m"],drn_spec["tn"])  
-        sim.solver_options.T = 1/flying_config["simulation"]["hz_sim"]
+        sim.solver_options.T = 1/rollout_config["hz_sim"]
         sim.solver_options.integrator_type = 'IRK'
         sim.code_export_directory = os.path.join(sim.code_export_directory,name)
 
         # Class variables
         self.nx,self.nu = sim.model.x.size()[0],sim.model.u.size()[0]
-        self.hz_sim = flying_config["simulation"]["hz_sim"]
-        self.t_dly = flying_config["simulation"]["delay"]
-        self.mu_md = np.array(flying_config["model_noise"]["mean"])
-        self.std_md = np.array(flying_config["model_noise"]["std"])
-        self.mu_sn = np.array(flying_config["sensor_noise"]["mean"])
-        self.std_sn = np.array(flying_config["sensor_noise"]["std"])
-        self.use_fusion = flying_config["sensor_model_fusion"]["use_fusion"]
-        self.Wf = np.diag(flying_config["sensor_model_fusion"]["weights"])
+        self.hz_sim = rollout_config["hz_sim"]
+        self.t_dly = rollout_config["delay"]
+        self.mu_md = np.array(rollout_config["model_noise"]["mean"])
+        self.std_md = np.array(rollout_config["model_noise"]["std"])
+        self.mu_sn = np.array(rollout_config["sensor_noise"]["mean"])
+        self.std_sn = np.array(rollout_config["sensor_noise"]["std"])
+        self.use_fusion = rollout_config["sensor_model_fusion"]["use_fusion"]
+        self.Wf = np.diag(rollout_config["sensor_model_fusion"]["weights"])
         self.simulator = AcadosSimSolver(sim, json_file=sim_json, verbose=False)
         
         self.code_export_path = sim.code_export_directory
         self.simulator_path = os.path.join(os.getcwd(),sim_json)
 
-    def simulate(self,controller:Type[BaseController],gsplat:SceneRender,
+    def simulate(self,controller:Type[BaseController],gsplat:GSplat,
                  t0:float,tf:int,x0:np.ndarray,
                  obj:Union[None,np.ndarray]=None):
         
@@ -155,7 +146,7 @@ class Flying():
         Tro[Nctl] = t0+Nsim/self.hz_sim
 
         return Tro,Xro,Uro,Imgs,Tsol,Adv
-
+    
     def clear_generated_code(self):
         """
         Method to clear the generated code and files to ensure the code is recompiled correctly each time.

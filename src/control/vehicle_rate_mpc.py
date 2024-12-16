@@ -6,70 +6,81 @@ import scipy.linalg
 import tsplines.min_snap as ms
 import utilities.trajectory_helper as th
 import utilities.dynamics_helper as dh
-from utilities.configs import ConFiGS
+from pathlib import Path
 
-from controller.base_controller import BaseController
+from control.base_controller import BaseController
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
 from casadi import vertcat
 from dynamics.quadcopter_model import export_quadcopter_ode_model
-from typing import Union,Tuple,Dict
+from typing import Union,Tuple,Dict,List,Any
 from copy import deepcopy
 import visualize.plot_trajectories as pt
 
 class VehicleRateMPC(BaseController):
-    def __init__(self, config:ConFiGS, use_RTI:bool=False, name:str="vrmpc") -> None:
+    def __init__(self, 
+                 policy_name:str,
+                 frame_name:str,
+                 course_name:str,
+                 configs_path:Path=None,
+                 use_RTI:bool=False, name:str="vrmpc") -> None:
         
         """
         Constructor for the VehicleRateMPC class.
         
         Args:
-            - config: FiGS configuration dictionary.
-            - use_RTI: Use RTI flag.
-            - name:   Name of the policy.
+            - policy_name: Name of the controller.
+            - frame_name:      Name of the frame.
+            - course_name:     Name of the course.
+            - configs_path:    Path to the directory containing the JSON files.
+            - use_RTI:         Use RTI flag.
+            - name:            Name of the controller.
 
         Variables:
-            - name:    Name of the policy.
-            - Nx:      Number of states.
-            - Nu:      Number of inputs.
-            - tXUd:    Ideal trajectory.
-            - Qk:      State cost matrix.
-            - Rk:      Input cost matrix.
-            - QN:      Terminal state cost matrix.
-            - lbu:     Lower bound on inputs.
-            - ubu:     Upper bound on inputs.
-            - wts:     Search weights for xv_ds.
-            - ns:      Search window size for xv_ds.
-            - hz:      Frequency of the MPC rollout.
-            - use_RTI: Use RTI flag.
-            - model:   Acados OCP model.
-            - solver:  Acados OCP Solver.
+            - hz:              Controller frequency.
+            - nzcr:            Feature vector size (if controller uses learned feedback. Set to None if not used).
 
-            - export_dir:       Directory where the code is exported.
-            - solver_path:      Path to the solver json file.
-            - simulator_path:   Path to the simulator json file.
+            - Nx:              Number of states.
+            - Nu:              Number of inputs.
+            - tXUd:            Desired trajectory.
+            - Qk:              State cost.
+            - Rk:              Input cost.
+            - QN:              Final state cost.
+            - Ws:              State cost.
+            - lbu:             Lower bound on inputs.
+            - ubu:             Upper bound on inputs.
+            - ns:              Number of states to consider.
+            - use_RTI:         Use RTI flag.
+            - model:           Model of the system.
+            - solver:          Solver object.
+            - code_export_path: Path to the generated code.
+            - solver_path:     Path to the solver JSON file.
 
         """
 
         # =====================================================================
         # Extract parameters
         # =====================================================================
-        fout_wps = config.get_config("fout_waypoints")
-        mpc_prms = config.get_config("mpc_parameters")
-        drn_prms = config.get_config("drone_parameters")
-        ctl_prms = config.get_config("control_parameters")
         
+        # Initialize the BaseController
+        super().__init__(configs_path)
+
+        # Load JSON Configurations
+        controller_config = self.load_json_config("policy",policy_name)
+        frame_config   = self.load_json_config("frame",frame_name)
+        course_config  = self.load_json_config("course",course_name)
+
         # MPC Parameters
-        Nhn = mpc_prms["horizon"]
-        Qk,Rk,QN = np.diag(mpc_prms["Qk"]),np.diag(mpc_prms["Rk"]),np.diag(mpc_prms["QN"])
-        Ws = np.diag(mpc_prms["Ws"])
+        Nhn = controller_config["horizon"]
+        Qk,Rk,QN = np.diag(controller_config["Qk"]),np.diag(controller_config["Rk"]),np.diag(controller_config["QN"])
+        Ws = np.diag(controller_config["Ws"])
 
         # Control Parameters
-        hz_ctl= ctl_prms["hz"]
-        lbu,ubu = np.array(ctl_prms["bounds"]["lower"]),np.array(ctl_prms["bounds"]["upper"])
+        hz_ctl= controller_config["hz"]
+        lbu,ubu = np.array(controller_config["bounds"]["lower"]),np.array(controller_config["bounds"]["upper"])
 
         # Derived Parameters
-        traj_config_pd = self.pad_trajectory(fout_wps,Nhn,hz_ctl)
-        drn_spec = dh.generate_specifications(drn_prms)
+        traj_config_pd = self.pad_trajectory(course_config,Nhn,hz_ctl)
+        drn_spec = dh.generate_specifications(frame_config)
         nx,nu = drn_spec["nx"], drn_spec["nu"]
 
         ny,ny_e = nx+nu,nx
@@ -88,8 +99,6 @@ class VehicleRateMPC(BaseController):
         
         # Convert to desired tXU
         tXUd = th.TS_to_tXU(Tpi,CPi,drn_spec,hz_ctl)
-        # pt.plot_tXU_spatial(tXUd)
-        # pt.plot_tXU_time(tXUd)
 
         # =====================================================================
         # Setup Acados Variables
@@ -137,8 +146,12 @@ class VehicleRateMPC(BaseController):
         # Controller Variables
         # =====================================================================
 
-        # Base Controller Variables
-        super().__init__(name,hz_ctl)
+        # ---------------------------------------------------------------------
+        # Necessary Variables for FiGS ----------------------------------------
+        self.hz = hz_ctl
+        self.nzcr = None
+
+        # ---------------------------------------------------------------------
 
         # Controller Specific Variables
         self.Nx,self.Nu = nx,nu
@@ -150,7 +163,7 @@ class VehicleRateMPC(BaseController):
         self.use_RTI = use_RTI
         self.model = ocp.model
         self.solver = AcadosOcpSolver(ocp,json_file=solver_json,verbose=False)
-
+        
         self.code_export_path = ocp.code_export_directory
         self.solver_path = os.path.join(os.getcwd(),solver_json)
 
@@ -160,7 +173,7 @@ class VehicleRateMPC(BaseController):
         
         for _ in range(5):
             self.control(0.0,tXUd[1:11,0])
-            
+
     def control(self,
                 tcr:float,xcr:np.ndarray,
                 upr:np.ndarray=None,
