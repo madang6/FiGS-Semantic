@@ -1,12 +1,12 @@
 
 import json
 import numpy as np
+
 from render.gsplat import GSplat
 from dynamics.flight import Flight
 from control.base_controller import BaseController
-from control.vehicle_rate_mpc import VehicleRateMPC
 from pathlib import Path
-from typing import Dict,List,Type,Union,TypedDict
+from typing import Dict,List,Type,Union
 
 class FiGS:
     """
@@ -19,7 +19,7 @@ class FiGS:
                  scene_name:str='scene003',
                  rollout_type:str='baseline',
                  frame_name:str='carl',
-                 configs_path:Path=None,gsplats_path:Path=None):
+                 configs_path:Path=None,gsplats_path:Path=None,verbose:bool=False) -> None:
         """
         FiGS facilitates drone flight within a GSplat and consists of two main components: a GSplat
         object and a Flight object. These configurations are stored in a dictionary called conFiGS.
@@ -37,7 +37,7 @@ class FiGS:
             - gsplats_path:   Path to the directory containing the gsplats.
 
         Variables:
-            - conFiGS:        Dictionary containing the configurations.
+            - conFiGS:        Dictionary containing the configurations used.
             - gsplat:         GSplat object.
             - flight:         Flight object.
             - configs_path:   Path to the directory containing the JSON files.
@@ -56,63 +56,69 @@ class FiGS:
         else:
             self.gsplats_path = gsplats_path
 
-        # Initialize the configurations dictionary and class components
+        # Initialize the configurations dictionary and class objects
         self.conFiGS = {
-            'gsplat': {},
-            'flight': {},
+            'gsplat': {
+                'scene': None
+            },
+            'flight': {
+                'rollout': None,
+                'frame': None
+            }
         }
         self.gsplat = None
         self.flight = None
 
         # Setup the GSplat and Flight objects
-        self.load_gsplat(scene_name,frame_name)
-        self.config_flight(rollout_type,frame_name)
+        self.load_gsplat(scene_name)
+        self.load_flight(rollout_type,frame_name)
 
         # Print the configurations
-        self.list_configs()
+        if verbose:
+            self.list_configs()
 
-    def load_gsplat(self, scene_name:str, frame_name:str):
+    def load_gsplat(self, scene_name:str) -> None:
         """
         Fills the GSplat key in ConFiGS and generates the GSplat object.
 
         Args:
             - scene_name:     Name of the scene to load.
-            - frame_name:     Name of the frame to load.
         """
 
         # Load the configurations
         scene_config = self.load_yaml_config(scene_name)
-        frame_config = self.load_json_config("frame",frame_name)
 
         # Add the configuration to the dictionary
-        self.conFiGS['gsplat'] = {
-            'scene': scene_config,
-            'frame': frame_config
-        }
+        self.conFiGS['gsplat']['scene'] = scene_config
 
-        # Re-generate the GSplat object
-        self.gsplat = GSplat(scene_config,frame_config)
+        # Create the GSplat object
+        self.gsplat = GSplat(scene_config)
 
-    def config_flight(self, rollout_type:str, frame_name:str):
+    def load_flight(self, rollout_type:str, frame_name:str) -> None:
         """
-        Fills the Flight key in ConFiGS.
+        Loads the Flight key in ConFiGS and generates the Flight object.
 
         Args:
             - rollout_type:   Type of rollout to load.
             - frame_name:     Name of the frame to load.
         """
 
+        # Delete the flight object if it exists
+        if self.flight is not None:
+            self.flight.clear_generated_code()
+            
         # Load the configurations
         rollout_config = self.load_json_config("rollout",rollout_type)
         frame_config = self.load_json_config("frame",frame_name)
 
         # Add the configuration to the dictionary
-        self.conFiGS['flight'] = {
-            'rollout': rollout_config,
-            'frame': frame_config
-        }
+        self.conFiGS['flight']['rollout'] = rollout_config
+        self.conFiGS['flight']['frame'] = frame_config
 
-    def list_configs(self,Npad=70,npad=8):
+        # Create the Flight object
+        self.flight = Flight(self.conFiGS['flight']['rollout'],self.conFiGS['flight']['frame'])
+
+    def list_configs(self,Npad=70,npad=8) -> None:
         """
         Lists the currently loaded configurations.
         """
@@ -127,7 +133,7 @@ class FiGS:
                 print(f"  {key.ljust(npad)}: {value['name']}")
         print("="*Npad)
 
-    def load_yaml_config(self, name:str):
+    def load_yaml_config(self, name:str) -> Dict[str,Union[str,Path]]:
         """
         Handles the yaml format for the conFiGS dictionary entries. Used for loading the GSplat
 
@@ -149,7 +155,7 @@ class FiGS:
 
         return config
 
-    def load_json_config(self, config:str, name:str):
+    def load_json_config(self, config:str, name:str) -> Dict[str,Union[str,float,List[float],Dict[str,Union[int,float]]]]:
         """
         Handles the json format for the conFiGS dictionary entries. Used for loading all configurations
         except the GSplat.
@@ -176,7 +182,8 @@ class FiGS:
         return config
     
     def simulate(self,policy:Type[BaseController],
-                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None):
+                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None,
+                 cleanup:bool=True) -> None:
         """
         Simulates the flight using the given policy. The policy must be a subclass of BaseController.
 
@@ -186,16 +193,19 @@ class FiGS:
             - tf:       Final time.
             - x0:       Initial state.
             - obj:      Objective to use for the simulation.
+            - cleanup:  Boolean to clear the flight object after simulation.
         """
-        
-        # Instantiate the Flight object
-        flight = Flight(self.conFiGS['flight']['rollout'],self.conFiGS['flight']['frame'])
+
+        # Check if the Flight object exists, else reload it from the configurations
+        if self.flight is None:
+            self.flight = Flight(self.conFiGS['flight']['rollout'],self.conFiGS['flight']['frame'])
 
         # Simulate the flight
-        Tro,Xro,Uro,Imgs,Tsol,Adv = flight.simulate(policy,self.gsplat,t0,tf,x0,obj)
+        Tro,Xro,Uro,Imgs,Tsol,Adv = self.flight.simulate(policy,self.gsplat,t0,tf,x0,obj)
 
-        # Clean up the Flight object
-        flight.clear_generated_code()
-        del flight
+        # Clear the Flight object if cleanup is True
+        if cleanup:
+            self.flight.clear_generated_code()
+            self.flight = None
 
         return Tro,Xro,Uro,Imgs,Tsol,Adv

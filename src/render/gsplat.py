@@ -4,31 +4,25 @@ import torch
 from pathlib import Path
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.utils.eval_utils import eval_setup
-from typing import Dict, List, Union 
+from typing import Dict, Union 
 
 class GSplat():
-    def __init__(self, scene_config:Dict[str,Union[str,Path]],
-                 frame_config:Dict[str,Union[int,float,List[float]]]) -> None:
+    def __init__(self, scene_config:Dict[str,Union[str,Path]]) -> None:
         """
         GSplat class for rendering images from GSplat pipeline.
 
         Args:
             - scene_config: FiGS scene configuration dictionary.
-            - frame_config: FiGS frame configuration dictionary.
 
         Variables:
             - device: Device to run the pipeline on.
             - config: Configuration for the pipeline.
             - pipeline: Pipeline for the GSplat model.
-            - camera_out: Output camera for the pipeline.
             - T_w2g: Transformation matrix from world to GSplat frame.
 
         """
 
         # Some useful intermediate variables
-        width,height = frame_config["camera"]["width"],frame_config["camera"]["height"]
-        fx,fy = frame_config["camera"]["fx"],frame_config["camera"]["fy"]
-        cx,cy = frame_config["camera"]["cx"],frame_config["camera"]["cy"]
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         T_w2g = np.array([
             [ 1.00, 0.00, 0.00, 0.00],
@@ -40,27 +34,26 @@ class GSplat():
         # Class variables
         self.device = device
         self.config,self.pipeline, _, _ = eval_setup(scene_config["path"],test_mode="inference")
-        self.camera_out = self.generate_output_camera(width,height,fx,fy,cx,cy)
         self.T_w2g = T_w2g
 
-    def generate_output_camera(self, width:int, height:int, fx:float, fy:float, cx:float, cy:float) -> Cameras:
+    def generate_output_camera(self, camera_config:Dict[str,Union[int,float]]) -> Cameras:
         """
-        Generate an output camera for the pipeline. By default we use the realsense camera parameters
-        when it is set to out 640x360 resolution.
+        Generate an output camera for the pipeline.
 
         Args:
-            - width: Width of the output image.
-            - height: Height of the output image.
-            - fx: Focal length in the x direction.
-            - fy: Focal length in the y direction.
-            - cx: Principal point in the x direction.
-            - cy: Principal point in the y direction.
+            - camera_config: Configuration dictionary for the camera. Contains
+                             width, height, channels, fx, fy, cx, cy.
 
         Returns:
             - camera_out: Output camera for the pipeline.
             
         """
+        # Extract the camera parameters
+        width,height = camera_config["width"],camera_config["height"]
+        fx,fy = camera_config["fx"],camera_config["fy"]
+        cx,cy = camera_config["cx"],camera_config["cy"]
 
+        # Create the camera object
         camera_ref = self.pipeline.datamanager.eval_dataset.cameras[0]
         camera_out = Cameras(
             camera_to_worlds=1.0*camera_ref.camera_to_worlds,
@@ -75,11 +68,12 @@ class GSplat():
 
         return camera_out
             
-    def render_rgb(self, T_c2w:np.ndarray) -> np.ndarray:
+    def render_rgb(self, camera:Cameras,T_c2w:np.ndarray) -> np.ndarray:
         """
         Render an RGB image from the GSplat pipeline.
 
         Args:
+            - camera: Camera object for the pipeline.
             - T_c2w: Transformation matrix from camera to world frame.
 
         Returns:
@@ -92,9 +86,9 @@ class GSplat():
         P_c2g = torch.tensor(T_c2g[0:3,:]).float()
 
         # Render rgb image from the pose
-        self.camera_out.camera_to_worlds = P_c2g[None,:3, ...]
+        camera.camera_to_worlds = P_c2g[None,:3, ...]
         with torch.no_grad():
-            image_rgb = self.pipeline.model.get_outputs_for_camera(self.camera_out, obb_box=None)["rgb"]
+            image_rgb = self.pipeline.model.get_outputs_for_camera(camera, obb_box=None)["rgb"]
 
         # Convert to output image
         image_rgb = image_rgb.cpu().numpy()             # Convert to numpy

@@ -3,7 +3,7 @@ from casadi import SX,vertcat
 
 def export_quadcopter_ode_model(m:float,tn:float) -> AcadosModel:
 
-    model_name = 'quadcopter_ode_model_'+str(m).replace('.', '_')+'_'+str(tn).replace('.', '_')
+    model_name = 'quadcopter_ode_model'
 
     # set up states
     px = SX.sym('px')

@@ -6,7 +6,7 @@ import numpy as np
 import math
 
 from scipy.spatial.transform import Rotation
-from typing import Dict,Union
+from typing import Dict,Tuple,Union
 
 def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]])  -> np.ndarray:
     """
@@ -229,3 +229,22 @@ def xv_to_T(xcr:np.ndarray) -> np.ndarray:
     Tcr[0:3,3] = xcr[0:3]
 
     return Tcr
+
+def RO_to_tXU(RO:Tuple[np.ndarray,np.ndarray,np.ndarray]) -> np.ndarray:
+    """
+    Converts a tuple of rollouts to a state vector and control input rollout.
+
+    Args:
+        - RO:    Rollout tuple (Tro,Xro,Uro).
+
+    Returns:
+        - tXU:   State vector and control input rollout.
+    """
+    # Unpack the tuple
+    Tro,Xro,Uro = RO
+
+    # Stack the arrays
+    Uro = np.hstack((Uro,Uro[:,-1].reshape(-1,1)))
+    tXU = np.vstack((Tro,Xro,Uro))
+
+    return tXU

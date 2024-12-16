@@ -4,12 +4,12 @@ import shutil
 import os
 import utilities.trajectory_helper as th
 
-from typing import Dict,List,Type,Union
 from control.base_controller import BaseController
 from render.gsplat import GSplat
 from acados_template import AcadosSimSolver, AcadosSim
 from dynamics.model_equations import export_quadcopter_ode_model
 from dynamics.model_specifications import generate_specifications
+from typing import Dict,List,Type,Union
 
 class Flight():
     def __init__(self, rollout_config:Dict[str,Union[int,float,List[float]]],
@@ -18,9 +18,9 @@ class Flight():
         Flying class for simulating drone flights.
 
         Args:
-            - rollout_config: Configuration dictionary for the rollout.
-            - frame_config: Configuration dictionary for the frame.
-            - name: Name of the flight.
+            - rollout_config:   Configuration dictionary for the rollout.
+            - frame_config:     Configuration dictionary for the frame.
+            - name:             Name of the flight.
 
         Variables:
             - nx: Number of states in the system.
@@ -74,6 +74,7 @@ class Flight():
 
         Args:
             - controller: Controller for the drone.
+            - camera: Camera object for rendering images.
             - gsplat: GSplat object for rendering images.
             - t0: Initial time.
             - tf: Final time.
@@ -96,7 +97,8 @@ class Flight():
         Nctl = int(dt*controller.hz)
         n_sim2ctl = int(self.hz_sim/controller.hz)
         n_delay = int(self.t_dly*self.hz_sim)
-        height,width,channels = int(gsplat.camera_out.height.item()),int(gsplat.camera_out.width.item()),3
+        cam_cfg = self.drn_spec["camera"]
+        height,width,channels = cam_cfg["height"],cam_cfg["width"],cam_cfg["channels"]
         T_c2b = self.drn_spec["T_c2b"]
 
         # Extract sensor and model parameters
@@ -121,6 +123,9 @@ class Flight():
         udl = np.hstack((ucm.reshape(-1,1),ucm.reshape(-1,1)))
         zcr = torch.zeros(controller.nzcr) if isinstance(controller.nzcr, int) else None
 
+        # Instantiate camera object
+        camera = gsplat.generate_output_camera(cam_cfg)
+
         # Rollout
         for i in range(Nsim):
             # Get current time and state
@@ -131,7 +136,7 @@ class Flight():
                 # Get current image
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
-                icr = gsplat.render_rgb(T_c2w)
+                icr = gsplat.render_rgb(camera,T_c2w)
 
                 # Add sensor noise and syncronize estimated state
                 if self.use_fusion:
