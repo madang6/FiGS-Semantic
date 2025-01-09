@@ -18,6 +18,7 @@ dependencies:
   - ipympl
   - matplotlib
   - cython
+  - colmap::conda-forge
   - fastai::opencv-python-headless=4.10.0.84
   - pytorch=2.1.2
   - torchvision=0.16.2
@@ -30,5 +31,6 @@ dependencies:
     - nerfstudio==1.1.4
     - -e .
     - -e ./acados/interfaces/acados_template/
+    - -e ./Hierarchical-Localization/
 prefix: /home/lowjunen/anaconda3/envs/figs
 

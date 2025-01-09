@@ -7,6 +7,7 @@ from dynamics.flight import Flight
 from control.base_controller import BaseController
 from pathlib import Path
 from typing import Dict,List,Type,Union
+import time
 
 class FiGS:
     """
@@ -52,7 +53,7 @@ class FiGS:
 
         # Set the gsplat directory
         if gsplats_path is None:
-            self.gsplats_path = Path(__file__).parent.parent/'gsplats'/'scene'/'output'
+            self.gsplats_path = Path(__file__).parent.parent/'gsplats'/'workspace'/'outputs'
         else:
             self.gsplats_path = gsplats_path
 

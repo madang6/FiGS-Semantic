@@ -1,0 +1,222 @@
+# Developed from: https://github.com/madang6/flightroom_ns_process/tree/feature/video_process
+
+from pathlib import Path
+import json
+from typing import List, Tuple, Dict, Union, Any
+
+from nerfstudio.process_data.images_to_nerfstudio_dataset import (
+    ImagesToNerfstudioDataset,
+)
+
+from rich.console import Console
+from rich.progress import Progress
+import utilities.capture_helper as ch
+import cv2
+import os
+import torch
+import numpy as np
+import open3d as o3d
+
+def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
+                    use_camera_config:bool=True,
+                    gsplats_path:Path=None,config_path:Path=None) -> None:
+    
+    # Initialize base paths
+    if gsplats_path is None:
+        gsplats_path = Path(__file__).parent.parent.parent/'gsplats'
+
+    if config_path is None:
+        config_path = Path(__file__).parent.parent.parent/'configs'
+
+    capture_cfg_path = config_path/'capture'
+    capture_path = gsplats_path/'capture'
+    workspace_path = gsplats_path/'workspace'
+    
+    # Find the correct video path
+    video_files = list(capture_path.glob(f"*{scene_file_name}*"))
+    if len(video_files) == 0:
+        raise FileNotFoundError(f"No file found with name containing '{scene_file_name}' in {capture_path}")
+    elif len(video_files) > 1:
+        raise ValueError(f"Multiple files found with name containing '{scene_file_name}' in {capture_path}")
+    else:
+        video_path = str(video_files[0])
+
+    # Initialize process paths
+    process_path = workspace_path / scene_file_name
+    images_path = process_path / "images"
+    sfm_path = process_path / "sfm"
+    sfm_spc_path = sfm_path / "sparse_pc.ply"
+    sfm_tfm_path = sfm_path / "transforms.json"
+
+    process_path.mkdir(parents=True, exist_ok=True)
+    images_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize output paths
+    output_path = workspace_path/'outputs'/scene_file_name
+    scene_spc_path = output_path / "sparse_pc.ply"
+    scene_tfm_path = output_path / "transforms.json"
+
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Load the capture config
+    capture_config_file = capture_cfg_path/f"{capture_cfg_name}.json"
+    with open(capture_config_file, "r") as file:
+        capture_configs = json.load(file)
+
+    camera_config = capture_configs["camera"]
+    extractor_config = capture_configs["extractor"]
+
+    # # Extract the frame data
+    # extract_frames(video_path,images_path,extractor_config)
+    
+    # # Run the ns_process step
+    # ns_obj = ImagesToNerfstudioDataset(
+    #     data=images_path, output_dir=sfm_path,
+    #     camera_type="perspective", matching_method="exhaustive",sfm_tool="hloc",gpu=True
+    # )
+    # ns_obj.main()
+
+    # Load the resulting transforms.json and sparse_points.ply
+    with open(sfm_tfm_path, "r") as f:
+        sfm_data = json.load(f)
+
+    sparse_pcloud = o3d.io.read_point_cloud(sfm_spc_path.as_posix())
+    sparse_points = torch.tensor(sparse_pcloud.points)
+    sparse_colors = torch.tensor(sparse_pcloud.colors)
+
+    # Check if frame count matches
+    if len(sfm_data["frames"]) != extractor_config["num_images"]:
+        raise ValueError(f"Frame count mismatch: {len(sfm_data['frames'])} frames in SfM data despite. Expected {len(extractor_config['num_images'])} images.")
+
+    # Compute the transform using aruco markers
+    TTarc,TTsfm = compute_cRt(sfm_path,extractor_config,camera_config)
+
+    return TTarc,TTsfm
+
+def extract_frames(video_path:Path,
+                   rgbs_path:Path,
+                   extractor_config:Dict['str',Union[int,float]]) -> List[np.ndarray]:
+    """
+    Extracts frame data from video into a folder of images.
+    
+    """
+
+    # Unpack the extractor configs
+    Nimg = extractor_config["num_images"]
+    Narc = extractor_config["num_marked"]
+    mkr_id = extractor_config["marker_id"]
+
+    # Initialize the aruco detector
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    aruco_params = cv2.aruco.DetectorParameters()
+    detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError("Error: Cannot open the video file.")
+    
+    # Survey frames for aruco markers
+    Ntot = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    Tarc,Temp = [],[]
+    for _ in range(Ntot):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Check if the frame has an aruco marker
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        _, ids, _ = detector.detectMarkers(gray)
+
+        # Bin the frame by the marker detection
+        if ids is not None and len(ids) == 1 and ids[0] == mkr_id:
+            Tarc.append(cap.get(cv2.CAP_PROP_POS_MSEC))
+        else:
+            Temp.append(cap.get(cv2.CAP_PROP_POS_MSEC))
+
+    # Check if enough aruco markers were found
+    if len(Tarc) < Narc:
+        Tout = Tarc + ch.distribute_values(Temp,Nimg-len(Tarc))
+        print(f"Warning: Only {len(Tarc)} aruco markers found. Using {Narc-len(Tarc)} empty frames to fill the gap.")
+    else:
+        Tout = ch.distribute_values(Tarc,Narc) + ch.distribute_values(Temp,Nimg-Narc)
+    
+    Tout.sort()
+
+    # Extract the selected frames
+    for idx, tout in enumerate(Tout):
+        cap.set(cv2.CAP_PROP_POS_MSEC,tout)
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Save the image
+        rgb_path = rgbs_path / f"frame_{idx+1:05d}.png"
+        cv2.imwrite(str(rgb_path),frame)
+
+    # Release the video capture object
+    cap.release()
+
+def compute_cRt(sfm_path:Path,extractor_config:Dict['str',Union[int,float]],
+                camera_config:Dict['str',Union[int,float]]=None) -> Tuple[np.ndarray,np.ndarray,np.ndarray]:
+    # Unpack the extractor configs
+    Nimg = extractor_config["num_images"]
+    Narc = extractor_config["num_marked"]
+    marker_length = extractor_config["marker_length"]
+    marker_id = extractor_config["marker_id"]
+
+    # Unpack the camera configs
+    if camera_config is None:
+        # TODO: Add option to use SfM camera parameters
+        raise ValueError("Camera configuration is not provided.")
+    else:
+        camera_matrix = np.array(camera_config["intrinsics_matrix"])
+        dist_coeffs = np.array(camera_config["distortion_coefficients"])
+
+    # Initialize the aruco detector
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    aruco_params = cv2.aruco.DetectorParameters()
+    detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
+
+    marker_points = np.array([
+        [-marker_length / 2,  marker_length / 2, 0],
+        [ marker_length / 2,  marker_length / 2, 0],
+        [ marker_length / 2, -marker_length / 2, 0],
+        [-marker_length / 2, -marker_length / 2, 0]
+    ])
+    
+    # Open the transforms.json file
+    with open(sfm_path / "transforms.json", "r") as f:
+        transforms = json.load(f)
+    frames = transforms["frames"]
+
+    TTarc,TTsfm = [],[]
+    for frame in frames:
+        # Open the image file
+        image_path = sfm_path.parent / frame["file_path"]
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise ValueError(f"Error: Cannot open the image file {image_path}")
+        
+        # Detect the aruco marker in the image
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = detector.detectMarkers(gray)
+
+        if ids is not None and len(ids) == 1 and ids[0] == marker_id:            
+            # Compute the Aruco transform
+            ret, rvec, tvec = cv2.solvePnP(
+                marker_points, corners[0], camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE
+            )
+
+            # Compute the transforms
+            if ret:
+                Tw2c_arc = np.eye(4)
+                Tw2c_arc[:3, :3],Tw2c_arc[:3, 3] = cv2.Rodrigues(rvec)[0],tvec.flatten()  # world to camera
+
+                Tarc = np.linalg.inv(Tw2c_arc) # camera to world
+                Tsfm = np.array(frame["transform_matrix"]) # camera to world
+
+                TTarc.append(Tarc)
+                TTsfm.append(Tsfm)
+            
+    return TTarc,TTsfm
