@@ -31,45 +31,89 @@ def distribute_values(values,num_picks):
     return selected_values
 
 
-def abs_orientation(X: torch.Tensor, Y: torch.Tensor):
+def compute_ransac_transform(W1:np.ndarray, W2:np.ndarray,
+                             n_batch:int=3,threshold:float=5e-2, max_iterations:int=1000) -> np.ndarray:
     """
-    Determine the optimal transformation that brings points from
-    X's reference frame to points in Y's.
-    T(x) = c * Rx + t where x is a point 3x1, c is the scaling,
-    R is a 3x3 rotation matrix, and t is a 3x1 translation.
-
-    This is based off of "Least-Squares Estimation of Transformation
-    Parameters Between Two Point Patterns" Umeyama 1991.
+    Compute the RANSAC transformation between two sets of 3D points.
 
     Args:
-        X - Tensor with dimension N x m
-        Y - Tensor with dimension N x m
-    returns:
-        c - Scalar scaling constant
-        R - Tensor 3x3 rotation matrix
-        t - Tensor 3
+        W1:             First set of 3D points (3 x N)
+        W2:             Second set of 3D points (3 x N)
+        threshold:      Inlier threshold
+        max_iterations: Maximum number of iterations
+
+    Returns:
+        Trsc:           Transformation matrix (4 x 4)
     """
 
-    N, m = X.shape
+    assert W1.shape == W2.shape, "Input arrays must have the same shape"
+    assert W1.shape[0] == 3, "Input arrays must have 3 rows (3D points)"
 
-    mux = torch.mean(X, 0, True)
-    muy = torch.mean(Y, 0, True)
+    N = W1.shape[1]
+    best_inliers = 0
+    best_rotation = None
+    best_translation = None
+    best_scale = None
 
-    Yd = (Y - muy).unsqueeze(-1)
-    Xd = (X - mux).unsqueeze(1)
-    sx = torch.sum(torch.norm(Xd.squeeze(), dim=1) ** 2) / N
-    Sxy = (1 / N) * torch.sum(torch.matmul(Yd, Xd), dim=0)
+    for _ in range(max_iterations):
+        # Randomly sample 3 points
+        idx = np.random.choice(N, n_batch, replace=False)
+        W1_sample = W1[:, idx]
+        W2_sample = W2[:, idx]
 
-    if torch.linalg.matrix_rank(Sxy) < m:
-        raise NameError("Absolute orientation transformation does not exist!")
+        # Estimate transformation (Rigid transformation: rotation + translation + scaling)
+        # Compute centroids
+        centroid_W1 = np.mean(W1_sample, axis=1, keepdims=True)
+        centroid_W2 = np.mean(W2_sample, axis=1, keepdims=True)
 
-    U, D, Vt = torch.linalg.svd(Sxy, full_matrices=True)
-    S = torch.eye(m).to(dtype=Vt.dtype)
-    if torch.linalg.det(Sxy) < 0:
-        S[-1, -1] = -1
+        # Center the points
+        W1_centered = W1_sample - centroid_W1
+        W2_centered = W2_sample - centroid_W2
 
-    R = U @ S @ Vt
-    c = torch.trace(torch.diag(D) @ S) / sx
-    t = muy.T - c * (R @ mux.T)
+        # Compute scaling factor
+        scale_est = np.linalg.norm(W2_centered) / np.linalg.norm(W1_centered)
 
-    return c, R, t.squeeze()
+        # Apply scaling to W1
+        W1_centered_scaled = W1_centered * scale_est
+
+        # Compute cross-covariance matrix
+        H = W1_centered_scaled @ W2_centered.T
+
+        # Singular Value Decomposition (SVD)
+        U, _, Vt = np.linalg.svd(H)
+        R_est = Vt.T @ U.T
+
+        # Ensure a proper rotation matrix (det(R) = 1)
+        if np.linalg.det(R_est) < 0:
+            Vt[2, :] *= -1
+            R_est = Vt.T @ U.T
+
+        t_est = centroid_W2.flatten() - scale_est * R_est @ centroid_W1.flatten()
+
+        # Count inliers
+        W1_transformed = scale_est * R_est @ W1 + t_est[:, np.newaxis]
+        distances = np.linalg.norm(W2 - W1_transformed, axis=0)
+        inliers = np.sum(distances < threshold)
+
+        # Update best transformation if current one is better
+        if inliers > best_inliers:
+            best_inliers = inliers
+            best_rotation = R_est
+            best_translation = t_est
+            best_scale = scale_est
+
+    # Compute the final transformation matrix
+    Trsc = np.eye(4)
+    Trsc[:3, :3] = best_scale * best_rotation
+    Trsc[:3, 3] = best_translation
+
+    # Compute some statistics
+    total_cost = 0.0
+    for i in range(N):
+        W1_transformed = best_scale * best_rotation @ W1[:, i] + best_translation
+        cost = np.linalg.norm(W2[:, i] - W1_transformed)
+        total_cost += cost
+
+    print(f"RANSAC: {best_inliers} inliers out of {N} points with threshold {threshold}m")
+
+    return Trsc
