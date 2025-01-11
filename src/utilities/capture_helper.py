@@ -43,7 +43,9 @@ def compute_ransac_transform(W1:np.ndarray, W2:np.ndarray,
         max_iterations: Maximum number of iterations
 
     Returns:
-        Trsc:           Transformation matrix (4 x 4)
+        co:             Scaling factor
+        Ro:             Rotation matrix
+        to:             Translation
     """
 
     assert W1.shape == W2.shape, "Input arrays must have the same shape"
@@ -51,9 +53,7 @@ def compute_ransac_transform(W1:np.ndarray, W2:np.ndarray,
 
     N = W1.shape[1]
     best_inliers = 0
-    best_rotation = None
-    best_translation = None
-    best_scale = None
+    co,Ro,to = None,None,None
 
     for _ in range(max_iterations):
         # Randomly sample 3 points
@@ -61,7 +61,6 @@ def compute_ransac_transform(W1:np.ndarray, W2:np.ndarray,
         W1_sample = W1[:, idx]
         W2_sample = W2[:, idx]
 
-        # Estimate transformation (Rigid transformation: rotation + translation + scaling)
         # Compute centroids
         centroid_W1 = np.mean(W1_sample, axis=1, keepdims=True)
         centroid_W2 = np.mean(W2_sample, axis=1, keepdims=True)
@@ -71,49 +70,71 @@ def compute_ransac_transform(W1:np.ndarray, W2:np.ndarray,
         W2_centered = W2_sample - centroid_W2
 
         # Compute scaling factor
-        scale_est = np.linalg.norm(W2_centered) / np.linalg.norm(W1_centered)
+        ce = np.linalg.norm(W2_centered) / np.linalg.norm(W1_centered)
 
         # Apply scaling to W1
-        W1_centered_scaled = W1_centered * scale_est
+        W1_centered_scaled = W1_centered*ce
 
         # Compute cross-covariance matrix
         H = W1_centered_scaled @ W2_centered.T
 
         # Singular Value Decomposition (SVD)
         U, _, Vt = np.linalg.svd(H)
-        R_est = Vt.T @ U.T
+        Re = Vt.T @ U.T
 
         # Ensure a proper rotation matrix (det(R) = 1)
-        if np.linalg.det(R_est) < 0:
+        if np.linalg.det(Re) < 0:
             Vt[2, :] *= -1
-            R_est = Vt.T @ U.T
+            Re = Vt.T @ U.T
 
-        t_est = centroid_W2.flatten() - scale_est * R_est @ centroid_W1.flatten()
+        te = centroid_W2.flatten() - ce*Re@centroid_W1.flatten()
 
         # Count inliers
-        W1_transformed = scale_est * R_est @ W1 + t_est[:, np.newaxis]
+        W1_transformed = ce*Re@W1 + te[:, np.newaxis]
         distances = np.linalg.norm(W2 - W1_transformed, axis=0)
         inliers = np.sum(distances < threshold)
 
         # Update best transformation if current one is better
         if inliers > best_inliers:
             best_inliers = inliers
-            best_rotation = R_est
-            best_translation = t_est
-            best_scale = scale_est
-
-    # Compute the final transformation matrix
-    Trsc = np.eye(4)
-    Trsc[:3, :3] = best_scale * best_rotation
-    Trsc[:3, 3] = best_translation
+            co,Ro,to = ce,Re,te
 
     # Compute some statistics
     total_cost = 0.0
     for i in range(N):
-        W1_transformed = best_scale * best_rotation @ W1[:, i] + best_translation
+        W1_transformed = co*Ro@W1[:, i] + to
         cost = np.linalg.norm(W2[:, i] - W1_transformed)
         total_cost += cost
 
     print(f"RANSAC: {best_inliers} inliers out of {N} points with threshold {threshold}m")
+    
+    return co,Ro,to
 
-    return Trsc
+def compute_default_transform(X:np.ndarray, Y:np.ndarray) -> np.ndarray:
+    X = torch.tensor(X, dtype=torch.float32)
+    Y = torch.tensor(Y, dtype=torch.float32)
+
+    N, m = X.shape
+
+    mux = torch.mean(X, 0, True)
+    muy = torch.mean(Y, 0, True)
+
+    Yd = (Y - muy).unsqueeze(-1)
+    Xd = (X - mux).unsqueeze(1)
+    sx = torch.sum(torch.norm(Xd.squeeze(), dim=1) ** 2) / N
+    Sxy = (1 / N) * torch.sum(torch.matmul(Yd, Xd), dim=0)
+
+    if torch.linalg.matrix_rank(Sxy) < m:
+        raise NameError("Absolute orientation transformation does not exist!")
+
+    U, D, Vt = torch.linalg.svd(Sxy, full_matrices=True)
+    S = torch.eye(m).to(dtype=Vt.dtype)
+    if torch.linalg.det(Sxy) < 0:
+        S[-1, -1] = -1
+
+    R = U @ S @ Vt
+    c = torch.trace(torch.diag(D) @ S) / sx
+    t = muy.T - c * (R @ mux.T)
+
+
+    return c, R, t

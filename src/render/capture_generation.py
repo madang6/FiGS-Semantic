@@ -57,7 +57,8 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
     images_path.mkdir(parents=True, exist_ok=True)
 
     # Initialize output paths
-    output_path = workspace_path/'outputs'/scene_file_name
+    outputs_path = workspace_path/'outputs'
+    output_path = outputs_path/scene_file_name
 
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -81,55 +82,62 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
 
     # # Load the resulting transforms.json and sparse_points.ply
     # with open(sfm_tfm_path, "r") as f:
-    #     sfm_data = json.load(f)
+    #     tfm_data = json.load(f)
     
     # sparse_pcloud = o3d.io.read_point_cloud(sfm_spc_path.as_posix())
-        
+    
     # # Check if frame count matches
-    # if len(sfm_data["frames"]) != extractor_config["num_images"]:
-    #     raise ValueError(f"Frame count mismatch: {len(sfm_data['frames'])} frames in SfM data despite. Expected {len(extractor_config['num_images'])} images.")
+    # if len(tfm_data["frames"]) != extractor_config["num_images"]:
+    #     raise ValueError(f"Frame count mismatch: {len(tfm_data['frames'])} frames in SfM data despite. Expected {len(extractor_config['num_images'])} images.")
 
     # # Compute the transform using aruco markers
-    # Ts2w = compute_sfm2world_transform(sfm_path,extractor_config,camera_config)
+    # Psfm,Parc = extract_positions(sfm_path,extractor_config,camera_config)
+    # cs,Rs,ts = ch.compute_ransac_transform(Psfm,Parc)
 
     # # Generate the sparse point cloud and transform files
-    # for frame in sfm_data["frames"]:
+    # for frame in tfm_data["frames"]:
     #     Tc2s = np.array(frame["transform_matrix"])
-    #     Tc2w = Ts2w@Tc2s
+
+    #     Tc2w = np.eye(4)
+    #     Tc2w[:3,:3],Tc2w[:3,3] = Rs@Tc2s[:3,:3],cs*Rs@Tc2s[:3,3] + ts
+
     #     frame["transform_matrix"] = Tc2w.tolist()
 
     # sparse_points = np.asarray(sparse_pcloud.points)
     # for idx, point in enumerate(sparse_points):
-    #     sparse_points[idx,:] = Ts2w[:3,:3]@point + Ts2w[:3,3]
+    #     sparse_points[idx,:] = cs*Rs@point + ts
+
     # sparse_pcloud.points = o3d.utility.Vector3dVector(sparse_points)
 
     # # Save the updated files
     # with open(tfm_path, "w", encoding="utf8") as f:
-    #     json.dump(sfm_data, f, indent=4)
+    #     json.dump(tfm_data, f, indent=4)
 
     # o3d.io.write_point_cloud(spc_path.as_posix(),sparse_pcloud)
 
     # Run the gsplat generation
     command = [
-        "ns-train",  # The command
-        "splatfacto",  # Subcommand
-        "--data",  # Option
-        process_path.as_posix()  # Path to the data
+        "ns-train",
+        "splatfacto",
+        "--data", process_path.as_posix(),
+        "--viewer.quit-on-train-completion", "True",
+        "--output-dir", outputs_path.as_posix(),
+        "nerfstudio-data",
+        "--orientation-method", "none",
+        "--center-method", "none",
+        "--auto-scale-poses", "False"
     ]
 
-    # Run the command with live output
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # Run the command
+    result = subprocess.run(command, cwd=workspace_path.as_posix(), capture_output=True, text=True)
 
-    # Dynamically print each line of output
-    for line in process.stdout:
-        print(line, end="")  # Print to terminal in real-time
-
-    # Wait for process to complete
-    process.wait()
-    if process.returncode != 0:
-        print("Command failed with error:")
-        for line in process.stderr:
-            print(line, end="")
+    # Check the result
+    if result.returncode == 0:
+        print("Command succeeded.")
+        print(result.stdout)  # Output of the command
+    else:
+        print("Command failed.")
+        print(result.stderr)  # Error output
 
 def extract_frames(video_path:Path,rgbs_path:Path,
                    extractor_config:Dict['str',Union[int,float]]) -> List[np.ndarray]:
@@ -194,9 +202,9 @@ def extract_frames(video_path:Path,rgbs_path:Path,
     # Release the video capture object
     cap.release()
 
-def compute_sfm2world_transform(sfm_path:Path,
-                             extractor_config:Dict['str',Union[int,float]],
-                             camera_config:Dict['str',Union[int,float]]=None) -> Tuple[np.ndarray,np.ndarray,np.ndarray]:
+def extract_positions(sfm_path:Path,
+                      extractor_config:Dict['str',Union[int,float]],
+                      camera_config:Dict['str',Union[int,float]]=None) -> Tuple[np.ndarray,np.ndarray,np.ndarray]:
     
     # Unpack the extractor configs
     Narc = extractor_config["num_marked"]
@@ -245,14 +253,15 @@ def compute_sfm2world_transform(sfm_path:Path,
             ret, rvec, tvec = cv2.solvePnP(
                 marker_points, corners[0], camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE
             )
-
+            
             # Compute the transforms
             if ret:
                 Tw2c_arc = np.eye(4)
                 Tw2c_arc[:3, :3],Tw2c_arc[:3, 3] = cv2.Rodrigues(rvec)[0],tvec.flatten()  # world to camera
 
-                Tarc = np.linalg.inv(Tw2c_arc) # camera to world
-                Tsfm = np.array(frame["transform_matrix"]) # camera to world
+                # Compute the camera to world transforms
+                Tarc = np.linalg.inv(Tw2c_arc)
+                Tsfm = np.array(frame["transform_matrix"])
 
                 TTarc.append(Tarc)
                 TTsfm.append(Tsfm)
@@ -265,7 +274,4 @@ def compute_sfm2world_transform(sfm_path:Path,
     Parc = np.array([T[:3,3] for T in TTarc]).T
     Psfm = np.array([T[:3,3] for T in TTsfm]).T
 
-    # Compute the RANSAC transformation
-    Ts2w = ch.compute_ransac_transform(Psfm,Parc)
-
-    return Ts2w
+    return Psfm,Parc
