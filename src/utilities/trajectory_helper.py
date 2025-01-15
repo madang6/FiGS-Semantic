@@ -75,6 +75,71 @@ def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]])  -> np.ndarra
 
     return xu
 
+def xu_to_fo(xu:np.ndarray,quad:Dict[str,Union[float,np.ndarray]]) -> np.ndarray:
+    """
+    Converts a state vector to approximation of flat output vector.
+
+    Args:
+        xuv:     State vector (NOTE: Uses full state).
+
+    Returns:
+        fo:     Flat output vector.
+    """
+
+    # Unpack variables
+    wxk,wyk,wzk = xu[10],xu[11],xu[12]
+    m,I,fMw = quad["m"],quad["I"],quad["fMw"]
+
+    # Initialize output
+    fo = np.zeros((4,5))
+
+    # Compute position terms
+    fo[0:3,0] = xu[0:3]
+
+    # Compute velocity terms
+    fo[0:3,1] = xu[3:6]
+
+    # Compute acceleration terms
+    Rk = Rotation.from_quat(xu[6:10]).as_matrix()       # Rotation matrix
+    xbt,ybt,zbt = Rk[:,0],Rk[:,1],Rk[:,2]               # Body frame vectors
+    gt = np.array([0.00,0.00,-9.81])                    # Acceleration due to gravity vector
+    c = (fMw@xu[13:17])[0]/m                            # Acceleration due to thrust vector
+
+    fo[0:3,2] = c*zbt-gt
+
+    # Compute yaw term
+    psi = np.arctan2(Rk[1,0], Rk[0,0])
+
+    fo[3,0]  = psi
+
+    # Compute yaw rate term
+    xct = np.array([np.cos(psi), np.sin(psi), 0])     # Intermediate frame x vector
+    yct = np.array([-np.sin(psi), np.cos(psi), 0])    # Intermediate frame y vector
+    B1 = c
+    B3 = -yct.T@zbt
+    C3 = np.linalg.norm(np.cross(yct,zbt))
+    D1 = wyk*(B1*C3)/C3
+    D3 = (wzk*(B1*C3)+(B3*D1))/B1
+
+    psid = D3/(xct.T@xbt)
+
+    fo[3,1] = psid
+
+    # Compute yaw acceleration term
+    Iinv = np.linalg.inv(I)
+    rv1:np.ndarray = xu[10:13]            # intermediate variable
+    rv2:np.ndarray = I@xu[10:13]          # intermediate variable
+    utau = (fMw@xu[13:17])[1:4]
+    wd = Iinv@(utau - np.cross(rv1,rv2))
+    E1 = wd[1]*(B1*C3)/C3
+    E3 = (wd[2]*(B1*C3)+(B3*E1))/B1
+
+    psidd = (E3 - 2*psid*wzk*xct.T@ybt + 2*psid*wyk*xct.T@zbt + wxk*wyk*yct.T@ybt + wxk*wzk*yct.T@zbt)/(xct.T@xbt)
+
+    fo[3,2] = psidd
+
+    return fo
+
 def ts_to_fo(tcr:float,Tp:float,CP:np.ndarray) -> np.ndarray:
     """
     Converts a trajectory spline (defined by Tp,CP) to a flat output.
