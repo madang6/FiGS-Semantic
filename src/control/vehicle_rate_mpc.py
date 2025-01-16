@@ -17,9 +17,9 @@ from typing import Union, Tuple, Dict
 
 class VehicleRateMPC(BaseController):
     def __init__(self, 
-                 policy_name:str,
-                 frame_name:str,
                  course_name:str,
+                 policy_name:str='vrmpc_fr',
+                 frame_name:str='carl',
                  configs_path:Path=None,
                  use_RTI:bool=False, name:str="vrmpc") -> None:
         
@@ -172,6 +172,9 @@ class VehicleRateMPC(BaseController):
         
         for _ in range(5):
             self.control(0.0,tXUd[1:11,0])
+
+        # Clear the generated code
+        self.clear_generated_code()
 
     def control(self,
                 tcr:float,xcr:np.ndarray,

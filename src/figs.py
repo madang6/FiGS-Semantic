@@ -17,7 +17,7 @@ class FiGS:
     conFiGS: Dict[str,Union[Path,Dict[str,Union[str,float,List[float],Dict[str,Union[int,float]]]]]]
 
     def __init__(self,
-                 scene_name:str='scene003',
+                 scene_name:str,
                  rollout_type:str='baseline',
                  frame_name:str='carl',
                  configs_path:Path=None,gsplats_path:Path=None,verbose:bool=False) -> None:
@@ -191,8 +191,7 @@ class FiGS:
         return config
     
     def simulate(self,policy:Type[BaseController],
-                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None,
-                 cleanup:bool=True) -> None:
+                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None) -> None:
         """
         Simulates the flight using the given policy. The policy must be a subclass of BaseController.
 
@@ -211,10 +210,5 @@ class FiGS:
 
         # Simulate the flight
         Tro,Xro,Uro,Imgs,Tsol,Adv = self.flight.simulate(policy,self.gsplat,t0,tf,x0,obj)
-
-        # Clear the Flight object if cleanup is True
-        if cleanup:
-            self.flight.clear_generated_code()
-            self.flight = None
 
         return Tro,Xro,Uro,Imgs,Tsol,Adv
