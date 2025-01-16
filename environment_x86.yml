@@ -18,7 +18,7 @@ dependencies:
   - ipympl
   - matplotlib
   - cython
-  - colmap::conda-forge
+  - conda-forge::colmap
   - fastai::opencv-python-headless=4.10.0.84
   - pytorch=2.1.2
   - torchvision=0.16.2
