@@ -7,6 +7,7 @@ from control.base_controller import BaseController
 from pathlib import Path
 from typing import Dict,List,Type,Union
 import time
+import os
 
 class FiGS:
     """
@@ -52,9 +53,9 @@ class FiGS:
 
         # Set the gsplat directory
         if gsplats_path is None:
-            self.gsplats_path = Path(__file__).parent.parent/'gsplats'/'workspace'/'outputs'
+            self.workspace_path = Path(__file__).parent.parent/'gsplats'/'workspace'
         else:
-            self.gsplats_path = gsplats_path
+            self.workspace_path = gsplats_path/'workspace'
 
         # Initialize the configurations dictionary and class objects
         self.conFiGS = {
@@ -79,11 +80,15 @@ class FiGS:
 
     def load_gsplat(self, scene_name:str) -> None:
         """
-        Fills the GSplat key in ConFiGS and generates the GSplat object.
+        Fills the GSplat key in ConFiGS and generates the GSplat object. We load the
+        scene from the workspace directory to avoid path issues across different computers.
 
         Args:
             - scene_name:     Name of the scene to load.
         """
+
+        # Get the current working directory
+        cwd = os.getcwd()
 
         # Load the configurations
         scene_config = self.load_yaml_config(scene_name)
@@ -92,7 +97,9 @@ class FiGS:
         self.conFiGS['gsplat']['scene'] = scene_config
 
         # Create the GSplat object
+        os.chdir(self.workspace_path)
         self.gsplat = GSplat(scene_config)
+        os.chdir(cwd)
 
     def load_flight(self, rollout_type:str, frame_name:str) -> None:
         """
@@ -143,7 +150,9 @@ class FiGS:
         Returns:
             - config: Dictionary containing the configuration.
         """
-        search_path = self.gsplats_path/name
+        
+        # Search for the configuration in the workspace directory
+        search_path = self.workspace_path/'outputs'/name
         yaml_configs = list(search_path.rglob("*.yml"))
 
         if len(yaml_configs) == 0:

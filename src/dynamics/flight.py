@@ -66,6 +66,9 @@ class Flight():
         self.code_export_path = sim.code_export_directory
         self.simulator_path = os.path.join(os.getcwd(),sim_json)
 
+        # Clear the generated code
+        self.clear_generated_code()
+
     def simulate(self,controller:Type[BaseController],gsplat:GSplat,
                  t0:float,tf:int,x0:np.ndarray,
                  obj:Union[None,np.ndarray]=None):
