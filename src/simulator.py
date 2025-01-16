@@ -9,7 +9,7 @@ from typing import Dict,List,Type,Union
 import time
 import os
 
-class FiGS:
+class Simulator:
     """
     Class to handle the configuration of parameters data.
     """
