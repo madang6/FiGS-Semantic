@@ -2,11 +2,8 @@
 Helper functions for capture generation.
 """
 
-import cv2
 import numpy as np
 import torch
-from pathlib import Path
-from typing import List,Union
 
 def distribute_values(values,num_picks):
     values = np.array(values)

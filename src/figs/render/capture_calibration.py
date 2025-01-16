@@ -3,7 +3,7 @@
 import numpy as np
 import cv2
 import json
-import utilities.capture_helper as ch
+import figs.utilities.capture_helper as ch
 
 from pathlib import Path
 from typing import Tuple

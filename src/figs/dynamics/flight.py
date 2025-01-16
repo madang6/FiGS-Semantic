@@ -2,13 +2,13 @@ import numpy as np
 import torch
 import shutil
 import os
-import utilities.trajectory_helper as th
+import figs.utilities.trajectory_helper as th
 
-from control.base_controller import BaseController
-from render.gsplat import GSplat
+from figs.control.base_controller import BaseController
+from figs.render.gsplat import GSplat
+from figs.dynamics.model_equations import export_quadcopter_ode_model
+from figs.dynamics.model_specifications import generate_specifications
 from acados_template import AcadosSimSolver, AcadosSim
-from dynamics.model_equations import export_quadcopter_ode_model
-from dynamics.model_specifications import generate_specifications
 from typing import Dict,List,Type,Union
 
 class Flight():

@@ -3,16 +3,16 @@ import shutil
 import os
 import numpy as np
 import scipy.linalg
-import tsplines.min_snap as ms
-import utilities.trajectory_helper as th
+import figs.tsplines.min_snap as ms
+import figs.utilities.trajectory_helper as th
 
 from pathlib import Path
 from copy import deepcopy
 from casadi import vertcat
 from acados_template import AcadosOcp, AcadosOcpSolver
-from control.base_controller import BaseController
-from dynamics.model_equations import export_quadcopter_ode_model
-from dynamics.model_specifications import generate_specifications
+from figs.control.base_controller import BaseController
+from figs.dynamics.model_equations import export_quadcopter_ode_model
+from figs.dynamics.model_specifications import generate_specifications
 from typing import Union, Tuple, Dict
 
 class VehicleRateMPC(BaseController):

@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import utilities.trajectory_helper as th
+import figs.utilities.trajectory_helper as th
 
 from scipy.spatial.transform import Rotation as R
 from typing import Union,Tuple,List

@@ -1,12 +1,11 @@
 import json
 import numpy as np
 
-from render.gsplat import GSplat
-from dynamics.flight import Flight
-from control.base_controller import BaseController
+from figs.render.gsplat import GSplat
+from figs.dynamics.flight import Flight
+from figs.control.base_controller import BaseController
 from pathlib import Path
 from typing import Dict,List,Type,Union
-import time
 import os
 
 class Simulator:
@@ -47,13 +46,13 @@ class Simulator:
 
         # Set the configuration directory
         if configs_path is None:
-            self.configs_path = Path(__file__).parent.parent/'configs'
+            self.configs_path = Path(__file__).parent.parent.parent/'configs'
         else:
             self.configs_path = configs_path
 
         # Set the gsplat directory
         if gsplats_path is None:
-            self.workspace_path = Path(__file__).parent.parent/'gsplats'/'workspace'
+            self.workspace_path = Path(__file__).parent.parent.parent/'gsplats'/'workspace'
         else:
             self.workspace_path = gsplats_path/'workspace'
 
@@ -154,7 +153,7 @@ class Simulator:
         # Search for the configuration in the workspace directory
         search_path = self.workspace_path/'outputs'/name
         yaml_configs = list(search_path.rglob("*.yml"))
-
+    
         if len(yaml_configs) == 0:
             raise ValueError(f"The search path '{search_path}' did not return any configurations.")
         elif len(yaml_configs) > 1:

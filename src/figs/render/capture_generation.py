@@ -2,32 +2,27 @@
 
 from pathlib import Path
 import json
-from typing import List, Tuple, Dict, Union, Any
+from typing import List, Tuple, Dict, Union
 
 from nerfstudio.process_data.images_to_nerfstudio_dataset import (
     ImagesToNerfstudioDataset,
 )
 
-from rich.console import Console
-from rich.progress import Progress
-import utilities.capture_helper as ch
+import figs.utilities.capture_helper as ch
 import cv2
-import os
-import torch
 import numpy as np
 import open3d as o3d
 import subprocess
 
 def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
-                    use_camera_config:bool=True,
                     gsplats_path:Path=None,config_path:Path=None) -> None:
     
     # Initialize base paths
     if gsplats_path is None:
-        gsplats_path = Path(__file__).parent.parent.parent/'gsplats'
+        gsplats_path = Path(__file__).parent.parent.parent.parent/'gsplats'
 
     if config_path is None:
-        config_path = Path(__file__).parent.parent.parent/'configs'
+        config_path = Path(__file__).parent.parent.parent.parent/'configs'
 
     capture_cfg_path = config_path/'capture'
     capture_path = gsplats_path/'capture'
