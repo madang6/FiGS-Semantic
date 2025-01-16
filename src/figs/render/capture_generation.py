@@ -19,10 +19,10 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
     
     # Initialize base paths
     if gsplats_path is None:
-        gsplats_path = Path(__file__).parent.parent.parent.parent/'gsplats'
+        gsplats_path = Path(__file__).parent.parent.parent.parent.parent/'gsplats'
 
     if config_path is None:
-        config_path = Path(__file__).parent.parent.parent.parent/'configs'
+        config_path = Path(__file__).parent.parent.parent.parent.parent/'configs'
 
     capture_cfg_path = config_path/'capture'
     capture_path = gsplats_path/'capture'

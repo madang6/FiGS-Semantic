@@ -11,7 +11,7 @@ license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
 dependencies = [
-"numpy==1.26.4",
+    "numpy",
     "scipy",
     "qpsolvers",
     "albumentations",
@@ -22,14 +22,9 @@ dependencies = [
     "ipympl",
     "matplotlib",
     "cython",
-    "torch==2.1.2",
-    "torchvision==0.16.2",
-    "pytorch-cuda==11.8",
-    "colmap",
-    "opencv-python-headless==4.10.0.84",
-    "cuda-toolkit",
-    "cuda-nvcc",
-    "nerfstudio==1.1.4",
+    "torch",
+    "torchvision",
+    "nerfstudio",
 ]
 
 [tool.setuptools.packages.find]

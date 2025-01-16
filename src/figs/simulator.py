@@ -46,13 +46,13 @@ class Simulator:
 
         # Set the configuration directory
         if configs_path is None:
-            self.configs_path = Path(__file__).parent.parent.parent/'configs'
+            self.configs_path = Path(__file__).parent.parent.parent.parent/'configs'
         else:
             self.configs_path = configs_path
 
         # Set the gsplat directory
         if gsplats_path is None:
-            self.workspace_path = Path(__file__).parent.parent.parent/'gsplats'/'workspace'
+            self.workspace_path = Path(__file__).parent.parent.parent.parent/'gsplats'/'workspace'
         else:
             self.workspace_path = gsplats_path/'workspace'
 
