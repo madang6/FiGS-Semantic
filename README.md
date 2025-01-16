@@ -1,9 +1,12 @@
 # FiGS
 Installation steps
-1) Install acados
+1) Update submodules
+```
+git submodule update --recursive --init
+```
+2) Install acados
 ```
 cd acados
-git submodule update --recursive --init
 
 mkdir -p build
 cd build
@@ -14,7 +17,7 @@ make install -j4
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"/home/admin/StanfordMSL/FiGS/acados/lib"
 export ACADOS_SOURCE_DIR="/home/admin/StanfordMSL/FiGS/acados"
 ```
-2) Setup conda environment
+3) Setup conda environment
 ```
 # in FiGS
 conda env create -f environment_x86.yml
@@ -22,6 +25,6 @@ conda activate figs
 ```
 3) Download example gsplat data
 ```
-# in FiGS
-gdown --folder https://drive.google.com/drive/folders/1YdezcMckg2INXGC33JA3CNbHgjXzfTzY?usp=drive_link
+# in FiGS directory
+gdown --folder https://drive.google.com/drive/folders/1Q3Jxt08MUev_jWzHjpdltze7X4VArsvA?usp=drive_link --remaining-ok
 ```
