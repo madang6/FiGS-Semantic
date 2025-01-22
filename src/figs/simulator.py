@@ -128,9 +128,10 @@ class Simulator:
         Args:
             - frame_name:     Name of the frame to load.
         """
+        
         # Clear previous solver
         del self.solver
-        
+
         # Load the frame config
         json_config = self.configs_path/"frame"/(frame_name+".json")
 
