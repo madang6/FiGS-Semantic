@@ -8,9 +8,10 @@ import math
 from scipy.spatial.transform import Rotation
 from typing import Dict,Tuple,Union
 
-def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]])  -> np.ndarray:
+def fo_to_xu(fo:np.ndarray,quad:Union[None,Dict[str,Union[float,np.ndarray]]])  -> np.ndarray:
     """
-    Converts a flat output vector to a state vector and body-rate command.
+    Converts a flat output vector to a state vector and body-rate command. Returns
+    just x if quad is None.
 
     Args:
         - fo:     Flat output array.
@@ -28,8 +29,6 @@ def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]])  -> np.ndarra
 
     psit  = fo[3,0]
     psidt = fo[3,1]
-
-    m,tn = quad["m"],quad["tn"]
 
     # Compute Gravity
     gt = np.array([0.00,0.00,-9.81])
@@ -67,9 +66,13 @@ def fo_to_xu(fo:np.ndarray,quad:Dict[str,Union[float,np.ndarray]])  -> np.ndarra
 
     wt = np.array([wxt,wyt,wzt])
 
-    # Compute Body-Rate Command
-    ut = np.hstack((m*c/tn,wt))
-    
+    # Compute Body-Rate Command if Quadcopter is defined
+    if quad is not None:
+        m,tn = quad["m"],quad["tn"]
+        ut = np.hstack((m*c/tn,wt))
+    else:
+        ut = np.zeros(0)
+
     # Stack
     xu = np.hstack((pt,vt,qt,ut))
 
@@ -163,9 +166,10 @@ def ts_to_fo(tcr:float,Tp:float,CP:np.ndarray) -> np.ndarray:
     return fo
 
 def ts_to_xu(tcr:float,Tp:float,CP:np.ndarray,
-             quad:Dict[str,Union[float,np.ndarray]]) -> np.ndarray:
+             quad:Union[None,Dict[str,Union[float,np.ndarray]]]) -> np.ndarray:
     """
     Converts a trajectory spline (defined by tf,CP) to a state vector and control input.
+    Returns just x if quad is None.
 
     Args:
         tcr:  Current segment time.
@@ -177,6 +181,7 @@ def ts_to_xu(tcr:float,Tp:float,CP:np.ndarray,
         xu:    State vector and control input.
     """
     fo = ts_to_fo(tcr,Tp,CP)
+
     return fo_to_xu(fo,quad)
 
 def TS_to_tXU(Tps:np.ndarray,CPs:np.ndarray,
@@ -184,7 +189,7 @@ def TS_to_tXU(Tps:np.ndarray,CPs:np.ndarray,
               hz:int) -> np.ndarray:
     """
     Converts a sequence of trajectory splines (defined by Tps,CPs) to a trajectory
-    rollout.
+    rollout. Returns just tX if quad is None.
 
     Args:
         - Tps:  Trajectory segment times.

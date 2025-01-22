@@ -21,18 +21,18 @@ class VehicleRateMPC(BaseController):
                  policy_name:str='vrmpc_fr',
                  frame_name:str='carl',
                  configs_path:Path=None,
-                 use_RTI:bool=False, name:str="vrmpc") -> None:
+                 use_RTI:bool=False) -> None:
         
         """
         Constructor for the VehicleRateMPC class.
         
         Args:
-            - policy_name: Name of the controller.
-            - frame_name:      Name of the frame.
-            - course_name:     Name of the course.
-            - configs_path:    Path to the directory containing the JSON files.
-            - use_RTI:         Use RTI flag.
-            - name:            Name of the controller.
+            - policy_name:      Name of the controller.
+            - frame_name:       Name of the frame.
+            - course_name:      Name of the course.
+            - configs_path:     Path to the directory containing the JSON files.
+            - use_RTI:          Use RTI flag.
+            - name:             Name of the controller.
 
         Variables:
             - hz:              Controller frequency.
@@ -52,7 +52,6 @@ class VehicleRateMPC(BaseController):
             - model:           Model of the system.
             - solver:          Solver object.
             - code_export_path: Path to the generated code.
-            - solver_path:     Path to the solver JSON file.
 
         """
 
@@ -83,7 +82,7 @@ class VehicleRateMPC(BaseController):
         nx,nu = drn_spec["nx"], drn_spec["nu"]
 
         ny,ny_e = nx+nu,nx
-        solver_json = 'acados_ocp_nlp_'+name+'.json'
+        solver_json = 'figs_ocp_solver.json'
         
         # =====================================================================
         # Compute Desired Trajectory
@@ -139,7 +138,11 @@ class VehicleRateMPC(BaseController):
         ocp.solver_options.tf = Nhn/hz_ctl
         ocp.solver_options.qp_solver_warm_start = 1
 
-        ocp.code_export_directory = os.path.join(ocp.code_export_directory,name)
+        solver = AcadosOcpSolver(ocp,json_file=solver_json,verbose=False)
+        
+        # Clear the generated code
+        os.remove(os.path.join(os.getcwd(),solver_json))
+        shutil.rmtree(ocp.code_export_directory)
 
         # =====================================================================
         # Controller Variables
@@ -161,10 +164,7 @@ class VehicleRateMPC(BaseController):
         self.ns = int(hz_ctl/5)
         self.use_RTI = use_RTI
         self.model = ocp.model
-        self.solver = AcadosOcpSolver(ocp,json_file=solver_json,verbose=False)
-        
-        self.code_export_path = ocp.code_export_directory
-        self.solver_path = os.path.join(os.getcwd(),solver_json)
+        self.solver = solver
 
         # =====================================================================
         # Warm start the solver
@@ -172,9 +172,6 @@ class VehicleRateMPC(BaseController):
         
         for _ in range(5):
             self.control(0.0,tXUd[1:11,0])
-
-        # Clear the generated code
-        self.clear_generated_code()
 
     def control(self,
                 tcr:float,xcr:np.ndarray,
@@ -310,22 +307,3 @@ class VehicleRateMPC(BaseController):
             ydes = np.hstack((ydes,np.tile(ydes[:,-1:],(1,idxf-self.tXUd.shape[1]))))
 
         return ydes
-    
-    def clear_generated_code(self):
-        """
-        Method to clear the generated code and files to ensure the code is recompiled correctly each time.
-        Clears the folder too if it is empty.
-        
-        """
-
-        # Clear the generated code
-        try:
-            os.remove(self.solver_path)
-            shutil.rmtree(self.code_export_path)
-        except:
-            pass
-
-        # Clear the parent directory if empty
-        parent_dir_path = os.path.dirname(self.code_export_path)
-        if not os.listdir(parent_dir_path) and (os.path.basename(parent_dir_path) == 'c_generated_code'):
-            shutil.rmtree(parent_dir_path)

@@ -1,47 +1,51 @@
-import json
-import numpy as np
-
-from figs.render.gsplat import GSplat
-from figs.dynamics.flight import Flight
-from figs.control.base_controller import BaseController
-from pathlib import Path
-from typing import Dict,List,Type,Union
 import os
+import shutil
+import json
+import torch
+import numpy as np
+import figs.utilities.trajectory_helper as th
+
+from pathlib import Path
+from typing import Type,Union
+from acados_template import AcadosSimSolver, AcadosSim
+from figs.control.base_controller import BaseController
+from figs.dynamics.model_equations import export_quadcopter_ode_model
+from figs.dynamics.model_specifications import generate_specifications
+from figs.render.gsplat import GSplat
 
 class Simulator:
     """
-    Class to handle the configuration of parameters data.
+    Class to simulation in FiGS
     """
-    # Pre-define the configs dictionary format
-    conFiGS: Dict[str,Union[Path,Dict[str,Union[str,float,List[float],Dict[str,Union[int,float]]]]]]
 
     def __init__(self,
-                 scene_name:str,
-                 rollout_type:str='baseline',
-                 frame_name:str='carl',
-                 configs_path:Path=None,gsplats_path:Path=None,verbose:bool=False) -> None:
+                 scene_name:str,rollout_name:str='baseline',
+                 frame_name:Union[None,str]='carl',
+                 configs_path:Path=None,gsplats_path:Path=None) -> None:
         """
-        FiGS facilitates drone flight within a GSplat and consists of two main components: a GSplat
-        object and a Flight object. These configurations are stored in a dictionary called conFiGS.
-        During initialization, the class loads a GSplat and sets up the conFiGS dictionary, while 
-        the Flight object is kept as None until needed for simulation. To execute FiGS, you invoke
-        the simulate method, which initializes the Flight object and runs the simulation. This design
-        provides a streamlined interface with ACADOS by abstracting its JSON-based configuration and
-        C backend.
+        The FiGS simulator simulates flying in a Gaussian Splat by using an ACADOS integrator
+        (solver) to rollout a trajectory in a Gaussian Splat (gsplat) according to a control
+        policy (policy) and simulation configuration (conFiG).
+
+        For efficiency, the gsplat and conFiG are tied to individual Simulator objects. The
+        solver and policy can be swapped out during runtime. This allows us to abstract away
+        the JSON-based configuration and C backend of ACADOS. Note that every time the solver
+        gets updated, the conFiG must also be uploaded with new drone specifications.
 
         Args:
-            - scene_name:     Name of the scene to load.
-            - rollout_type:   Type of rollout to load.
-            - frame_name:     Name of the frame to load.
-            - configs_path:   Path to the directory containing the JSON files.
-            - gsplats_path:   Path to the directory containing the gsplats.
+            - scene_name:       Name of the scene to load.
+            - rollout_name:     Rollout config to load.
+            - frame_name:       Name of the frame to load (None if not instantiating with a frame).
+            - configs_path:     Path to the directory containing the JSON files.
+            - gsplats_path:     Path to the directory containing the gsplats.
 
-        Variables:
-            - conFiGS:        Dictionary containing the configurations used.
-            - gsplat:         GSplat object.
-            - flight:         Flight object.
-            - configs_path:   Path to the directory containing the JSON files.
-            - gsplats_path:   Path to the directory containing the gsplats.
+        Attributes:
+            - gsplat:           Gaussian Splat of the scene.
+            - conFiG:           Dictionary holding simulation configurations (frequency, noise, delay and drone specs).
+            - solver:           An ACADOS integrator for the drone dynamics.
+            - policy:           Policy to control the drone (an ACADOS OCP based MPC by default).
+            - configs_path:     Path to the configuration directory.
+            - workspace_path:   Path to the gsplat directory.
         """
 
         # Set the configuration directory
@@ -56,102 +60,29 @@ class Simulator:
         else:
             self.workspace_path = gsplats_path/'workspace'
 
-        # Initialize the configurations dictionary and class objects
-        self.conFiGS = {
-            'gsplat': {
-                'scene': None
-            },
-            'flight': {
-                'rollout': None,
-                'frame': None
-            }
-        }
+        # Instantiate empty attributes
         self.gsplat = None
-        self.flight = None
+        self.conFiG = {"rollout":{},"drone":{}}
+        self.solver = None
 
-        # Setup the GSplat and Flight objects
-        self.load_gsplat(scene_name)
-        self.load_flight(rollout_type,frame_name)
+        # Load the attributes
+        self.load_scene(scene_name)
+        self.load_rollout(rollout_name)
+        self.load_frame(frame_name)
 
-        # Print the configurations
-        if verbose:
-            self.list_configs()
-
-    def load_gsplat(self, scene_name:str) -> None:
+    def load_scene(self, scene_name:str):
         """
-        Fills the GSplat key in ConFiGS and generates the GSplat object. We load the
-        scene from the workspace directory to avoid path issues across different computers.
+        Loads/Updates the gsplat attribute given a scene name.
 
         Args:
             - scene_name:     Name of the scene to load.
         """
 
-        # Get the current working directory
-        cwd = os.getcwd()
+        # Get current and workspace directories
+        curr_path,work_path = Path(os.getcwd()),self.workspace_path
 
-        # Load the configurations
-        scene_config = self.load_yaml_config(scene_name)
-
-        # Add the configuration to the dictionary
-        self.conFiGS['gsplat']['scene'] = scene_config
-
-        # Create the GSplat object
-        os.chdir(self.workspace_path)
-        self.gsplat = GSplat(scene_config)
-        os.chdir(cwd)
-
-    def load_flight(self, rollout_type:str, frame_name:str) -> None:
-        """
-        Loads the Flight key in ConFiGS and generates the Flight object.
-
-        Args:
-            - rollout_type:   Type of rollout to load.
-            - frame_name:     Name of the frame to load.
-        """
-
-        # Delete the flight object if it exists
-        if self.flight is not None:
-            self.flight.clear_generated_code()
-            
-        # Load the configurations
-        rollout_config = self.load_json_config("rollout",rollout_type)
-        frame_config = self.load_json_config("frame",frame_name)
-
-        # Add the configuration to the dictionary
-        self.conFiGS['flight']['rollout'] = rollout_config
-        self.conFiGS['flight']['frame'] = frame_config
-
-        # Create the Flight object
-        self.flight = Flight(self.conFiGS['flight']['rollout'],self.conFiGS['flight']['frame'])
-
-    def list_configs(self,Npad=70,npad=8) -> None:
-        """
-        Lists the currently loaded configurations.
-        """
-        components = list(self.conFiGS.keys())
-
-        print("="*Npad)
-        print("Currently Loaded Configs:")
-        print("="*Npad)
-        for component in components:
-            print(component.capitalize())
-            for key,value in self.conFiGS[component].items():
-                print(f"  {key.ljust(npad)}: {value['name']}")
-        print("="*Npad)
-
-    def load_yaml_config(self, name:str) -> Dict[str,Union[str,Path]]:
-        """
-        Handles the yaml format for the conFiGS dictionary entries. Used for loading the GSplat
-
-        Args:
-            - name:   Name of the configuration to load.
-
-        Returns:
-            - config: Dictionary containing the configuration.
-        """
-        
-        # Search for the configuration in the workspace directory
-        search_path = self.workspace_path/'outputs'/name
+        # Find the GSplat configuration
+        search_path = work_path/'outputs'/scene_name
         yaml_configs = list(search_path.rglob("*.yml"))
     
         if len(yaml_configs) == 0:
@@ -159,55 +90,185 @@ class Simulator:
         elif len(yaml_configs) > 1:
             raise ValueError(f"The search path '{search_path}' returned multiple configurations. Please specify a unique configuration within the directory.")
         else:
-            config = {"name":name,"path":yaml_configs[0]}
+            gsplat_config = {"name":scene_name,"path":yaml_configs[0]}
 
-        return config
+        # Load GSplat (from the workspace directory to avoid path issues)
+        os.chdir(work_path)
+        gsplat = GSplat(gsplat_config)
+        os.chdir(curr_path)
 
-    def load_json_config(self, config:str, name:str) -> Dict[str,Union[str,float,List[float],Dict[str,Union[int,float]]]]:
+        # Update attribute(s)
+        self.gsplat = gsplat
+
+    def load_rollout(self, rollout_name:str):
         """
-        Handles the json format for the conFiGS dictionary entries. Used for loading all configurations
-        except the GSplat.
+        Loads/Updates the conFiG attribute given a rollout name.
 
         Args:
-            - config:   Name of the configuration to load.
-            - name:     Name of the configuration to load.
-
-        Returns:
-            - config: Dictionary containing the configuration.
+            - rollout_name:   Type of rollout to load.
         """
-        json_config = self.configs_path/config/(name+".json")
+
+        # Load the rollout config
+        json_config = self.configs_path/"rollout"/(rollout_name+".json")
 
         if not json_config.exists():
             raise ValueError(f"The json file '{json_config}' does not exist.")
         else:
             # Load the json configuration
             with open(json_config) as file:
-                config = json.load(file)
-            
-            # Add the name to the configuration
-            config["name"] = name
+                rollout_config = json.load(file)
+        
+        # Update attribute(s)
+        self.conFiG["rollout"] = rollout_config
+        
+    def load_frame(self, frame_name:str):
+        """
+        Loads the solver attribute.
 
-        return config
+        Args:
+            - frame_name:     Name of the frame to load.
+        """
+        # Clear previous solver
+        del self.solver
+        
+        # Load the frame config
+        json_config = self.configs_path/"frame"/(frame_name+".json")
+
+        if not json_config.exists():
+            raise ValueError(f"The json file '{json_config}' does not exist.")
+        else:
+            # Load the json configuration
+            with open(json_config) as file:
+                frame_config = json.load(file)
+            
+        # Some useful intermediate variables
+        drn_spec = generate_specifications(frame_config)
+        sim_json = 'figs_sim_solver.json'
+
+        # Generate the simulator
+        sim = AcadosSim()
+        sim.model = export_quadcopter_ode_model(drn_spec["m"],drn_spec["tn"])  
+        sim.solver_options.T = 1/self.conFiG["rollout"]["frequency"]
+        sim.solver_options.integrator_type = 'IRK'
+
+        solver = AcadosSimSolver(sim, json_file=sim_json, verbose=False)
+
+        # Clean up the ACADOS generation files
+        os.remove(os.path.join(os.getcwd(),sim_json))
+        shutil.rmtree(sim.code_export_directory)
+        
+        # Update attribute(s)
+        self.solver = solver
+        self.conFiG["drone"] = drn_spec
     
     def simulate(self,policy:Type[BaseController],
                  t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None) -> None:
         """
-        Simulates the flight using the given policy. The policy must be a subclass of BaseController.
+        Simulates the flight.
 
         Args:
-            - policy:   Policy to use for the simulation.
             - t0:       Initial time.
             - tf:       Final time.
             - x0:       Initial state.
             - obj:      Objective to use for the simulation.
-            - cleanup:  Boolean to clear the flight object after simulation.
         """
 
-        # Check if the Flight object exists, else reload it from the configurations
-        if self.flight is None:
-            self.flight = Flight(self.conFiGS['flight']['rollout'],self.conFiGS['flight']['frame'])
+        # Unpack Variables
+        hz_sim = self.conFiG["rollout"]["frequency"]
+        t_dly = self.conFiG["rollout"]["delay"]
+        mu_md_s = np.array(self.conFiG["rollout"]["model_noise"]["mean"])
+        std_md_s = np.array(self.conFiG["rollout"]["model_noise"]["std"])
+        mu_sn = np.array(self.conFiG["rollout"]["sensor_noise"]["mean"])
+        std_sn = np.array(self.conFiG["rollout"]["sensor_noise"]["std"])
+        use_fusion = self.conFiG["rollout"]["sensor_model_fusion"]["use_fusion"]
+        Wf = np.diag(self.conFiG["rollout"]["sensor_model_fusion"]["weights"])
+        nx,nu = self.conFiG["drone"]["nx"],self.conFiG["drone"]["nu"]
+        cam_cfg = self.conFiG["drone"]["camera"]
+        height,width,channels = cam_cfg["height"],cam_cfg["width"],cam_cfg["channels"]
+        T_c2b = self.conFiG["drone"]["T_c2b"]
 
-        # Simulate the flight
-        Tro,Xro,Uro,Imgs,Tsol,Adv = self.flight.simulate(policy,self.gsplat,t0,tf,x0,obj)
+        # Derived Variables
+        n_sim2ctl = int(hz_sim/policy.hz)  # Number of simulation steps per control step
+        mu_md = mu_md_s*(1/n_sim2ctl)           # Scale model mean noise to control rate
+        std_md = std_md_s*(1/n_sim2ctl)         # Scale model std noise to control rate
+        dt = np.round(tf-t0)
+        Nsim = int(dt*hz_sim)
+        Nctl = int(dt*policy.hz)
+        n_delay = int(t_dly*hz_sim)
+        Wf_sn,Wf_md = Wf,1-Wf
 
-        return Tro,Xro,Uro,Imgs,Tsol,Adv
+        # Rollout Variables
+        Tro,Xro,Uro = np.zeros(Nctl+1),np.zeros((nx,Nctl+1)),np.zeros((nu,Nctl))
+        Iro = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
+        Xro[:,0] = x0
+
+        # Diagnostics Variables
+        Tsol = np.zeros((4,Nctl))
+        Adv = np.zeros((nu,Nctl))
+        
+        # Transient Variables
+        xcr,xpr,xsn = x0.copy(),x0.copy(),x0.copy()
+        ucm = np.array([-self.conFiG["drone"]['m']/self.conFiG["drone"]['tn'],0.0,0.0,0.0])
+        udl = np.hstack((ucm.reshape(-1,1),ucm.reshape(-1,1)))
+        zcr = torch.zeros(policy.nzcr) if isinstance(policy.nzcr, int) else None
+
+        # Instantiate camera object
+        camera = self.gsplat.generate_output_camera(cam_cfg)
+
+        # Rollout
+        for i in range(Nsim):
+            # Get current time and state
+            tcr = t0+i/hz_sim
+
+            # Control
+            if i % n_sim2ctl == 0:
+                # Get current image
+                Tb2w = th.xv_to_T(xcr)
+                T_c2w = Tb2w@T_c2b
+                icr = self.gsplat.render_rgb(camera,T_c2w)
+
+                # Add sensor noise and syncronize estimated state
+                if use_fusion:
+                    xsn += np.random.normal(loc=mu_sn,scale=std_sn)
+                    xsn = Wf_sn@xsn + Wf_md@xcr
+                else:
+                    xsn = xcr + np.random.normal(loc=mu_sn,scale=std_sn)
+                xsn[6:10] = th.obedient_quaternion(xsn[6:10],xpr[6:10])
+
+                # Generate controller command
+                ucm,zcr,adv,tsol = policy.control(tcr,xsn,ucm,obj,icr,zcr)
+
+                # Update delay buffer
+                udl[:,0] = udl[:,1]
+                udl[:,1] = ucm
+
+            # Extract delayed command
+            uin = udl[:,0] if i%n_sim2ctl < n_delay else udl[:,1]
+
+            # Simulate both estimated and actual states
+            xcr = self.solver.simulate(x=xcr,u=uin)
+            if use_fusion:
+                xsn = self.solver.simulate(x=xsn,u=uin)
+
+            # Add model noise
+            xcr = xcr + np.random.normal(loc=mu_md,scale=std_md)
+            xcr[6:10] = th.obedient_quaternion(xcr[6:10],xpr[6:10])
+
+            # Update previous state
+            xpr = xcr
+            
+            # Store values
+            if i % n_sim2ctl == 0:
+                k = i//n_sim2ctl
+
+                Iro[k,:,:,:] = icr
+                Tro[k] = tcr
+                Xro[:,k+1] = xcr
+                Uro[:,k] = ucm
+                Tsol[:,k] = tsol
+                Adv[:,k] = adv
+
+        # Log final time
+        Tro[Nctl] = t0+Nsim/hz_sim
+
+        return Tro,Xro,Uro,Iro,Tsol,Adv
