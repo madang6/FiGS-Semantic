@@ -17,9 +17,9 @@ from typing import Union, Tuple, Dict
 
 class VehicleRateMPC(BaseController):
     def __init__(self, 
-                 course_name:str,
-                 policy_name:str='vrmpc_fr',
-                 frame_name:str='carl',
+                 course:str,
+                 policy:str,
+                 frame:str,
                  configs_path:Path=None,
                  use_RTI:bool=False) -> None:
         
@@ -27,12 +27,12 @@ class VehicleRateMPC(BaseController):
         Constructor for the VehicleRateMPC class.
         
         Args:
-            - policy_name:      Name of the controller.
-            - frame_name:       Name of the frame.
-            - course_name:      Name of the course.
-            - configs_path:     Path to the directory containing the JSON files.
-            - use_RTI:          Use RTI flag.
-            - name:             Name of the controller.
+            - course:       Name/Config Dict of the course.
+            - policy:       Name/Config Dict of the controller.
+            - frame:        Name/Config Dict of the frame.
+            - configs_path: Path to the directory containing the JSON files.
+            - use_RTI:      Use RTI flag.
+            - name:         Name of the controller.
 
         Variables:
             - hz:              Controller frequency.
@@ -63,18 +63,29 @@ class VehicleRateMPC(BaseController):
         super().__init__(configs_path)
 
         # Load JSON Configurations
-        controller_config = self.load_json_config("policy",policy_name)
-        frame_config   = self.load_json_config("frame",frame_name)
-        course_config  = self.load_json_config("course",course_name)
+        if type(course) is str:
+            course_config  = self.load_json_config("course",course)
+        else:
+            course_config = course
+
+        if type(policy) is str:
+            policy_config = self.load_json_config("policy",policy)
+        else:
+            policy_config = policy
+
+        if type(frame) is str:
+            frame_config = self.load_json_config("frame",frame)
+        else:
+            frame_config = frame
 
         # MPC Parameters
-        Nhn = controller_config["horizon"]
-        Qk,Rk,QN = np.diag(controller_config["Qk"]),np.diag(controller_config["Rk"]),np.diag(controller_config["QN"])
-        Ws = np.diag(controller_config["Ws"])
+        Nhn = policy_config["horizon"]
+        Qk,Rk,QN = np.diag(policy_config["Qk"]),np.diag(policy_config["Rk"]),np.diag(policy_config["QN"])
+        Ws = np.diag(policy_config["Ws"])
 
         # Control Parameters
-        hz_ctl= controller_config["hz"]
-        lbu,ubu = np.array(controller_config["bounds"]["lower"]),np.array(controller_config["bounds"]["upper"])
+        hz_ctl= policy_config["hz"]
+        lbu,ubu = np.array(policy_config["bounds"]["lower"]),np.array(policy_config["bounds"]["upper"])
 
         # Derived Parameters
         traj_config_pd = self.pad_trajectory(course_config,Nhn,hz_ctl)
@@ -163,7 +174,6 @@ class VehicleRateMPC(BaseController):
         self.lbu,self.ubu = lbu,ubu
         self.ns = int(hz_ctl/5)
         self.use_RTI = use_RTI
-        self.model = ocp.model
         self.solver = solver
 
         # =====================================================================
@@ -212,8 +222,12 @@ class VehicleRateMPC(BaseController):
         # Set desired trajectory
         for i in range(self.solver.acados_ocp.dims.N):
             self.solver.cost_set(i, "yref", ydes[:,i])
-        self.solver.cost_set(self.solver.acados_ocp.dims.N, "yref", ydes[0:10,-1])
+            self.solver.set(i,'x',ydes[0:10,i])
+            self.solver.set(i,'u',ydes[10:,i])
 
+        self.solver.cost_set(self.solver.acados_ocp.dims.N, "yref", ydes[0:10,-1])
+        self.solver.set(self.solver.acados_ocp.dims.N,'x',ydes[0:10,-1])
+        
         # Solve OCP
         t1 = time.time()
         if self.use_RTI:

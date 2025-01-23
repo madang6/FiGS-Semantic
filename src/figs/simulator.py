@@ -20,7 +20,7 @@ class Simulator:
 
     def __init__(self,
                  scene_name:str,rollout_name:str='baseline',
-                 frame_name:Union[None,str]='carl',
+                 frame_name:Union[None,str]=None,
                  configs_path:Path=None,gsplats_path:Path=None) -> None:
         """
         The FiGS simulator simulates flying in a Gaussian Splat by using an ACADOS integrator
@@ -68,7 +68,9 @@ class Simulator:
         # Load the attributes
         self.load_scene(scene_name)
         self.load_rollout(rollout_name)
-        self.load_frame(frame_name)
+
+        if frame_name is not None:
+            self.load_frame(frame_name)
 
     def load_scene(self, scene_name:str):
         """
@@ -100,28 +102,32 @@ class Simulator:
         # Update attribute(s)
         self.gsplat = gsplat
 
-    def load_rollout(self, rollout_name:str):
+    def load_rollout(self, rollout:Union[str,dict]):
         """
         Loads/Updates the conFiG attribute given a rollout name.
 
         Args:
-            - rollout_name:   Type of rollout to load.
+            - rollout:   Type of rollout to load.
         """
 
-        # Load the rollout config
-        json_config = self.configs_path/"rollout"/(rollout_name+".json")
+        # Check if rollout is a string or dictionary
+        if isinstance(rollout,str):
+            # Load the rollout config
+            json_config = self.configs_path/"rollout"/(rollout+".json")
 
-        if not json_config.exists():
-            raise ValueError(f"The json file '{json_config}' does not exist.")
+            if not json_config.exists():
+                raise ValueError(f"The json file '{json_config}' does not exist.")
+            else:
+                # Load the json configuration
+                with open(json_config) as file:
+                    rollout_config = json.load(file)
         else:
-            # Load the json configuration
-            with open(json_config) as file:
-                rollout_config = json.load(file)
-        
+            rollout_config = rollout
+
         # Update attribute(s)
         self.conFiG["rollout"] = rollout_config
         
-    def load_frame(self, frame_name:str):
+    def load_frame(self, frame:Union[str,dict]):
         """
         Loads the solver attribute.
 
@@ -129,19 +135,23 @@ class Simulator:
             - frame_name:     Name of the frame to load.
         """
         
+        # Check if rollout is a string or dictionary
+        if isinstance(frame,str):
+            # Load the frame config
+            json_config = self.configs_path/"frame"/(frame+".json")
+
+            if not json_config.exists():
+                raise ValueError(f"The json file '{json_config}' does not exist.")
+            else:
+                # Load the json configuration
+                with open(json_config) as file:
+                    frame_config = json.load(file)
+        else:
+            frame_config = frame
+
         # Clear previous solver
         del self.solver
-
-        # Load the frame config
-        json_config = self.configs_path/"frame"/(frame_name+".json")
-
-        if not json_config.exists():
-            raise ValueError(f"The json file '{json_config}' does not exist.")
-        else:
-            # Load the json configuration
-            with open(json_config) as file:
-                frame_config = json.load(file)
-            
+        
         # Some useful intermediate variables
         drn_spec = generate_specifications(frame_config)
         sim_json = 'figs_sim_solver.json'
@@ -173,6 +183,10 @@ class Simulator:
             - x0:       Initial state.
             - obj:      Objective to use for the simulation.
         """
+
+        # Check if frame is loaded
+        if self.solver is None:
+            raise ValueError("Frame has not been loaded. Please load a frame before simulating.")
 
         # Unpack Variables
         hz_sim = self.conFiG["rollout"]["frequency"]
