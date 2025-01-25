@@ -20,6 +20,7 @@ class VehicleRateMPC(BaseController):
                  course:str,
                  policy:str,
                  frame:str,
+                 name:str="vrmpc",
                  configs_path:Path=None,
                  use_RTI:bool=False) -> None:
         
@@ -161,7 +162,7 @@ class VehicleRateMPC(BaseController):
 
         # ---------------------------------------------------------------------
         # Necessary Variables for Base Controller -----------------------------
-        self.name = "vrmpc"
+        self.name = name
         self.hz = hz_ctl
         self.nzcr = None
 
