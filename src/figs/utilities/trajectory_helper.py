@@ -184,6 +184,35 @@ def ts_to_xu(tcr:float,Tp:float,CP:np.ndarray,
 
     return fo_to_xu(fo,quad)
 
+def TS_to_xu(tcr:float,Tps:np.ndarray,CPs:np.ndarray,
+              quad:Union[None,Dict[str,Union[float,np.ndarray]]]) -> np.ndarray:
+    """
+    Extracts the state and input from a sequence of trajectory splines (defined by
+    Tps,CPs). Returns just x if quad is None.
+
+    Args:
+        - tcr:  Current segment time.
+        - Tps:  Trajectory segment times.
+        - CPs:  Trajectory control points.
+        - quad: Quadcopter specifications.
+
+    Returns:
+        xu:    State vector and control input.
+    """
+    idx = np.max(np.where(Tps < tcr)[0])
+    
+    if idx == len(Tps)-1:
+        tcr = Tps[-1]
+        t0,tf = Tps[-2],Tps[-1]
+        CPk = CPs[-1,:,:]
+    else:
+        t0,tf = Tps[idx],Tps[idx+1]
+        CPk = CPs[idx,:,:]
+
+    xu = ts_to_xu(tcr-t0,tf-t0,CPk,quad)
+
+    return xu
+
 def TS_to_tXU(Tps:np.ndarray,CPs:np.ndarray,
               quad:Union[None,Dict[str,Union[float,np.ndarray]]],
               hz:int) -> np.ndarray:

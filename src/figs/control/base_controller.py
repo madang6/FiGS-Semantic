@@ -34,6 +34,7 @@ class BaseController(ABC):
             self.configs_path = configs_path
 
         # Necessary attributes
+        self.name = None
         self.hz = None
         self.nzcr = None
 

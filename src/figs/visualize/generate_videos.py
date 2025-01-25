@@ -20,6 +20,6 @@ def images_to_mp4(images:np.ndarray, filename:str, fps:int):
         images = np.repeat(images, 3, axis=-1)
 
     # Write video using imageio
-    with imageio.get_writer(filename, format='FFMPEG', mode='I', fps=fps) as writer:
+    with imageio.get_writer(filename, format='FFMPEG', mode='I', fps=fps, macro_block_size=None) as writer:
         for frame in images:
             writer.append_data(frame)

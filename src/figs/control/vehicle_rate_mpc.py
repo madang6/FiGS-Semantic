@@ -160,7 +160,8 @@ class VehicleRateMPC(BaseController):
         # =====================================================================
 
         # ---------------------------------------------------------------------
-        # Necessary Variables for FiGS ----------------------------------------
+        # Necessary Variables for Base Controller -----------------------------
+        self.name = "vrmpc"
         self.hz = hz_ctl
         self.nzcr = None
 

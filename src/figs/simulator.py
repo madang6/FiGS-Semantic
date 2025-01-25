@@ -6,7 +6,7 @@ import numpy as np
 import figs.utilities.trajectory_helper as th
 
 from pathlib import Path
-from typing import Type,Union
+from typing import Type,Union,Tuple
 from acados_template import AcadosSimSolver, AcadosSim
 from figs.control.base_controller import BaseController
 from figs.dynamics.model_equations import export_quadcopter_ode_model
@@ -173,7 +173,8 @@ class Simulator:
         self.conFiG["drone"] = drn_spec
     
     def simulate(self,policy:Type[BaseController],
-                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None) -> None:
+                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None
+                 ) -> Tuple[np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """
         Simulates the flight.
 
