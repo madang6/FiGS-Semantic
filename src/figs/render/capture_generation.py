@@ -14,7 +14,7 @@ import numpy as np
 import open3d as o3d
 import subprocess
 
-def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
+def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
                     gsplats_path:Path=None,config_path:Path=None) -> None:
     
     # Initialize base paths
@@ -68,12 +68,12 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
     # Extract the frame data
     extract_frames(video_path,images_path,extractor_config)
     
-    # Run the ns_process step
-    ns_obj = ImagesToNerfstudioDataset(
-        data=images_path, output_dir=sfm_path,
-        camera_type="perspective", matching_method="exhaustive",sfm_tool="hloc",gpu=True
-    )
-    ns_obj.main()
+    # # Run the ns_process step
+    # ns_obj = ImagesToNerfstudioDataset(
+    #     data=images_path, output_dir=sfm_path,
+    #     camera_type="perspective", matching_method="exhaustive",sfm_tool="hloc",gpu=True
+    # )
+    # ns_obj.main()
 
     # Load the resulting transforms.json and sparse_points.ply
     with open(sfm_tfm_path, "r") as f:
@@ -85,6 +85,25 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str,
     if len(tfm_data["frames"]) != extractor_config["num_images"]:
         raise ValueError(f"Frame count mismatch: {len(tfm_data['frames'])} frames in SfM data despite. Expected {len(extractor_config['num_images'])} images.")
 
+    # Use sfm config if camera config is not provided
+    if camera_config is None:
+        fx,fy = tfm_data["fl_x"],tfm_data["fl_y"]
+        cx,cy = tfm_data["cx"],tfm_data["cy"]
+        k1,k2 = tfm_data["k1"],tfm_data["k2"]
+        p1,p2 = tfm_data["p1"],tfm_data["p2"]
+
+        camera_config = {
+            "model": tfm_data["camera_model"],
+            "height": tfm_data["h"],
+            "width": tfm_data["w"],
+            "intrinsics_matrix": [
+                [ fx, 0.0,  cx],
+                [0.0,  fy,  cy],
+                [0.0, 0.0, 1.0]
+            ],
+            "distortion_coefficients": [k1,k2,p1,p2]
+        }
+        
     # Compute the transform using aruco markers
     Psfm,Parc = extract_positions(sfm_path,extractor_config,camera_config)
     cs,Rs,ts = ch.compute_ransac_transform(Psfm,Parc)
