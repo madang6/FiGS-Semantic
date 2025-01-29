@@ -68,12 +68,12 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
     # Extract the frame data
     extract_frames(video_path,images_path,extractor_config)
     
-    # # Run the ns_process step
-    # ns_obj = ImagesToNerfstudioDataset(
-    #     data=images_path, output_dir=sfm_path,
-    #     camera_type="perspective", matching_method="exhaustive",sfm_tool="hloc",gpu=True
-    # )
-    # ns_obj.main()
+    # Run the ns_process step
+    ns_obj = ImagesToNerfstudioDataset(
+        data=images_path, output_dir=sfm_path,
+        camera_type="perspective", matching_method="exhaustive",sfm_tool="hloc",gpu=True
+    )
+    ns_obj.main()
 
     # Load the resulting transforms.json and sparse_points.ply
     with open(sfm_tfm_path, "r") as f:
