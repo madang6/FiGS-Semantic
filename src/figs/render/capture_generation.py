@@ -118,6 +118,8 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
         with open(tfm_path, "w", encoding="utf8") as f:
             json.dump(tfm_data, f, indent=4)
         
+        o3d.io.write_point_cloud(spc_path.as_posix(),sparse_pcloud)
+        
         # Run the gsplat generation
         command = [
             "ns-train",
@@ -126,6 +128,7 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
             "--viewer.quit-on-train-completion", "True",
             "--output-dir", 'outputs',
             "--pipeline.model.camera-optimizer.mode", "SO3xR3",
+            "--pipeline.model.rasterize-mode antialiased",
             "nerfstudio-data",
             "--orientation-method", "none",
             "--center-method", "none"
