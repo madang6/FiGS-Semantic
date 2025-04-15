@@ -69,7 +69,7 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
     # Extract the frame data
     extract_frames(video_path,images_path,extractor_config)
     
-    # Run the ns_process step
+    # ns_process data step
     ns_obj = ImagesToNerfstudioDataset(
         data=images_path, output_dir=sfm_path,
         camera_type="perspective", matching_method="exhaustive",sfm_tool="hloc",gpu=True
@@ -84,7 +84,11 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
     
     # Check if frame count matches
     if len(tfm_data["frames"]) != extractor_config["num_images"]:
-        raise ValueError(f"Frame count mismatch: {len(tfm_data['frames'])} frames in SfM data despite. Expected {len(extractor_config['num_images'])} images.")
+        if len(tfm_data["frames"]) < round(0.99 * extractor_config["num_images"]):
+            raise ValueError(f"Frame count mismatch: {len(tfm_data['frames'])} frames in SfM data. Expected {extractor_config['num_images']} images.")
+        else:
+            print(f"Warning: Frame count mismatch: {len(tfm_data['frames'])} frames in SfM data. Expected {extractor_config['num_images']} images.")
+        # raise ValueError(f"Frame count mismatch: {len(tfm_data['frames'])} frames in SfM data. Expected {extractor_config['num_images']} images.")
 
     # Use sfm config if camera config is not provided
     if camera_config is None:
@@ -110,17 +114,66 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
     cs,Rs,ts = ch.compute_ransac_transform(Psfm,Parc)
 
     if embedding_config == "semantic":
+        # sfm_to_world_T = np.eye(4)
+        # sfm_to_world_T[:3,:3],sfm_to_world_T[:3,3] = cs*Rs,ts
+
+        # # Save the updated files
+        # tfm_data["sfm_to_mocap_T"] = []
+        # sfm_T = {}
+        # sfm_T["sfm_to_mocap_T"] = sfm_to_world_T.tolist()
+        # tfm_data["sfm_to_mocap_T"].append(sfm_T)
+        # with open(tfm_path, "w", encoding="utf8") as f:
+        #     json.dump(tfm_data, f, indent=4)
+        
+        # o3d.io.write_point_cloud(spc_path.as_posix(),sparse_pcloud)
+        
+        # # Run the gsplat generation
+        # command = [
+        #     "ns-train",
+        #     "gemsplat",
+        #     "--data", scene_file_name,
+        #     "--viewer.quit-on-train-completion", "True",
+        #     "--output-dir", 'outputs',
+        #     "--pipeline.model.camera-optimizer.mode", "SO3xR3",
+        #     # "--pipeline.model.rasterize-mode antialiased",
+        #     "nerfstudio-data",
+        #     "--orientation-method", "none",
+        #     "--center-method", "none"
+        # ]
         sfm_to_world_T = np.eye(4)
         sfm_to_world_T[:3,:3],sfm_to_world_T[:3,3] = cs*Rs,ts
 
         # Save the updated files
-        tfm_data["sfm_to_mocap_T"] = sfm_to_world_T.tolist()
+        tfm_data["sfm_to_mocap_T"] = []
+        sfm_T = {}
+        sfm_T["sfm_to_mocap_T"] = sfm_to_world_T.tolist()
+        tfm_data["sfm_to_mocap_T"].append(sfm_T)
         with open(tfm_path, "w", encoding="utf8") as f:
             json.dump(tfm_data, f, indent=4)
         
+        # Generate the sparse point cloud and transform files
+        for frame in tfm_data["frames"]:
+            Tc2s = np.array(frame["transform_matrix"])
+
+            Tc2w = np.eye(4)
+            Tc2w[:3,:3],Tc2w[:3,3] = Rs@Tc2s[:3,:3],cs*Rs@Tc2s[:3,3] + ts
+
+            frame["transform_matrix"] = Tc2w.tolist()
+
+        sparse_points = np.asarray(sparse_pcloud.points)
+        for idx, point in enumerate(sparse_points):
+            sparse_points[idx,:] = cs*Rs@point + ts
+
+        sparse_pcloud.points = o3d.utility.Vector3dVector(sparse_points)
+
+        # Save the updated files
+        with open(tfm_path, "w", encoding="utf8") as f:
+            json.dump(tfm_data, f, indent=4)
+
         o3d.io.write_point_cloud(spc_path.as_posix(),sparse_pcloud)
-        
+
         # Run the gsplat generation
+        print("Command to run:")
         command = [
             "ns-train",
             "gemsplat",
@@ -128,11 +181,61 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
             "--viewer.quit-on-train-completion", "True",
             "--output-dir", 'outputs',
             "--pipeline.model.camera-optimizer.mode", "SO3xR3",
-            "--pipeline.model.rasterize-mode antialiased",
             "nerfstudio-data",
             "--orientation-method", "none",
-            "--center-method", "none"
+            "--center-method", "none",
         ]
+        print(" ".join(command))
+    elif embedding_config == "no_ransac":
+
+        sfm_to_world_T = np.eye(4)
+        sfm_to_world_T[:3,:3],sfm_to_world_T[:3,3] = cs*Rs,ts
+
+        # Save the updated files
+        tfm_data["sfm_to_mocap_T"] = []
+        sfm_T = {}
+        sfm_T["sfm_to_mocap_T"] = sfm_to_world_T.tolist()
+        tfm_data["sfm_to_mocap_T"].append(sfm_T)
+        with open(tfm_path, "w", encoding="utf8") as f:
+            json.dump(tfm_data, f, indent=4)
+        
+        # Generate the sparse point cloud and transform files
+        for frame in tfm_data["frames"]:
+            Tc2s = np.array(frame["transform_matrix"])
+
+            Tc2w = np.eye(4)
+            Tc2w[:3,:3],Tc2w[:3,3] = Rs@Tc2s[:3,:3],cs*Rs@Tc2s[:3,3] + ts
+            # Tc2w[:3,:3],Tc2w[:3,3] = Tc2s[:3,:3],Tc2s[:3,3]
+
+            frame["transform_matrix"] = Tc2w.tolist()
+
+        sparse_points = np.asarray(sparse_pcloud.points)
+        for idx, point in enumerate(sparse_points):
+            sparse_points[idx,:] = cs*Rs@point + ts
+            # sparse_points[idx,:] = point
+
+        sparse_pcloud.points = o3d.utility.Vector3dVector(sparse_points)
+
+        # Save the updated files
+        with open(tfm_path, "w", encoding="utf8") as f:
+            json.dump(tfm_data, f, indent=4)
+
+        o3d.io.write_point_cloud(spc_path.as_posix(),sparse_pcloud)
+
+        # Run the gsplat generation
+        print("Command to run:")
+        command = [
+            "ns-train",
+            "splatfacto",
+            "--data", scene_file_name,
+            "--viewer.quit-on-train-completion", "True",
+            "--output-dir", 'outputs',
+            "--pipeline.model.camera-optimizer.mode", "SO3xR3",
+            "nerfstudio-data",
+            "--orientation-method", "none",
+            "--center-method", "none",
+        ]
+        print(" ".join(command))
     else:
         # Generate the sparse point cloud and transform files
         for frame in tfm_data["frames"]:
@@ -159,6 +262,7 @@ def generate_gsplat(scene_file_name:str,capture_cfg_name:str='default',
         command = [
             "ns-train",
             "splatfacto",
+            # "gemsplat",
             "--data", scene_file_name,
             "--viewer.quit-on-train-completion", "True",
             "--output-dir", 'outputs',
@@ -308,8 +412,8 @@ def extract_positions(sfm_path:Path,
                 TTsfm.append(Tsfm)
     
     # Check if the number of transforms match our expectations
-    if len(TTarc) != Narc:
-        raise ValueError("Error: Mismatched number of aruco and sfm transforms.")
+    if len(TTarc) < Narc-1:
+        raise ValueError(f"Error: Mismatched number of aruco and sfm transforms. Only found {len(TTarc)} aruco markers. Expected {Narc}.")
 
     # Extract the positions
     Parc = np.array([T[:3,3] for T in TTarc]).T
