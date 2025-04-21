@@ -33,8 +33,10 @@ class GSplat():
 
         """
         # Do some acrobatics to find necessary config files
-        self.config_path = scene_config
+        self.config_path = scene_config['path']
         current_path = self.config_path
+        print(f"Current path dict: {current_path}")
+        print(f"Current path name: {current_path.name}")
         found_paths = []
         while current_path != current_path.name:  # Stop when reaching the filesystem root
             if current_path.name == "SousVide-Semantic":
@@ -65,7 +67,7 @@ class GSplat():
 
         # Class variables
         self.device = device
-        self.config,self.pipeline, _, _ = eval_setup(scene_config,test_mode="inference")
+        self.config,self.pipeline, _, _ = eval_setup(scene_config['path'],test_mode="inference")
         self.T_w2g = T_w2g
 
         self.dataparser_scale = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale
@@ -152,8 +154,9 @@ class GSplat():
         """
 
         # Extract the camera to gsplat pose
-        T_c2g = self.T_w2g@T_c2w
+        T_c2g = self.dataparser_scale * self.T_w2g@T_c2w
         P_c2g = torch.tensor(T_c2g[0:3,:]).float()
+        P_c2g[:3,:3]*=1/self.dataparser_scale
 
         # Render rgb image from the pose
         camera.camera_to_worlds = P_c2g[None,:3, ...]
@@ -254,7 +257,7 @@ class GSplat():
             if self.perception_mode not in outputs.keys():
                 print(f"No semantic output with perception mode {self.perception_mode}")
                 image_sem = outputs['rgb']
-            elif self.perception_mode is "MDS":
+            elif self.perception_mode == "MDS":
                 # image_sem = torch.mean(outputs['rgb'], dim=-1, keepdim=True).repeat(1, 1, 3)
                 # image_mono = torch.tensordot(outputs['rgb'], torch.tensor([0.2989, 0.5870, 0.1140]), dims=([-1], [0]))
                 # image_sem = torch.cat([image_mono, outputs['depth'], outputs['sem']], dim=1)

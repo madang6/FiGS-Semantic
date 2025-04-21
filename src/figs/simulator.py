@@ -11,7 +11,7 @@ from acados_template import AcadosSimSolver, AcadosSim
 from figs.control.base_controller import BaseController
 from figs.dynamics.model_equations import export_quadcopter_ode_model
 from figs.dynamics.model_specifications import generate_specifications
-from figs.render.gsplat import GSplat
+from figs.render.gsplat_semantic import GSplat
 
 class Simulator:
     """
