@@ -32,27 +32,15 @@ import open3d as o3d
 # # # # #
 
 def rescale_point_cloud(nerf,viz=False,cull=False,verbose=False):
-    """
-    Rescale the point cloud of the environment to the correct scale and
-    transform it to the correct coordinate system. Additionally, interfaces
-    for scene editing via croppping, culling, and bounding the gaussians.
-    Args:
-        nerf: NeRF object.
-        viz: Whether to visualize the point cloud.
-        cull: Whether to cull the point cloud.
-        verbose: Whether to print the bounding box.
-    Returns:
-        epcds: Open3D point cloud object.
-        env_pcd_scaled: Scaled point cloud.
-        epcds_bounds: Bounding box of the point cloud.
-        env_pcd: Original point cloud.
-        env_pcd_mask: Mask of the point cloud.
-        env_attr: Attributes of the point cloud.
-    """
+    # viz = False
+    # verbose = True
+
+    # cull = True
     
     # Generate the point cloud of the environment
     env_pcd, env_pcd_mask, env_attr = nerf.generate_point_cloud(use_bounding_box=True)
-    # env_pcd, env_pcd_mask, env_attr = nerf.generate_point_cloud(use_bounding_box=True,bounding_box_max=(5.50,2.75,2.5),bounding_box_min=(-5.50,-2.75,0.0))
+    # env_pcd, env_pcd_mask, env_attr = nerf.generate_point_cloud(
+    #     use_bounding_box=True,bounding_box_max=(0.50,1.00,0.3),bounding_box_min=(-0.50,-1.00,0.0))
 
     cl, ind = env_pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.0)
     filtered_pcd = env_pcd.select_by_index(ind)
@@ -61,18 +49,19 @@ def rescale_point_cloud(nerf,viz=False,cull=False,verbose=False):
     dataparser_transform = nerf.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform
 
     if viz:
-        # visualize original (gsplat as-trained) point cloud
         epcds = o3d.geometry.PointCloud()
         env_pcd_unscaled = np.asarray(filtered_pcd.points, dtype=np.float64).reshape(-1, 3)
         print(f"(1) Unscaled Point Cloud:")
         epcds.points = o3d.utility.Vector3dVector(env_pcd_unscaled)
         env_pcd_colors = np.asarray(filtered_pcd.colors, dtype=np.float64).reshape(-1, 3)
         epcds.colors = o3d.utility.Vector3dVector(env_pcd_colors)
-        o3d.visualization.draw_plotly([epcds])
+        # o3d.visualization.draw_plotly([epcds])
 
     env_pcd_scaled = np.asarray(filtered_pcd.points).T / dataparser_scale
     env_pcd_scaled = np.vstack((env_pcd_scaled, np.ones((1, env_pcd_scaled.shape[1]))))
+    
     env_pcd_scaled = nerf.T_w2g @ env_pcd_scaled
+
     env_pcd_scaled = env_pcd_scaled[:3, :].T
 
     epcds = o3d.geometry.PointCloud()
@@ -82,7 +71,11 @@ def rescale_point_cloud(nerf,viz=False,cull=False,verbose=False):
     minbound = np.percentile(env_pcd_scaled,10, axis=0).tolist()
     maxbound = np.percentile(env_pcd_scaled,90, axis=0).tolist()
     if cull:
+        # minbound = np.array([-6.5, -3.75, -2.5]).tolist()
+        # maxbound = np.array([6.5, 3.75, 0.0]).tolist()
         cullbox = o3d.geometry.AxisAlignedBoundingBox(min_bound=minbound, max_bound=maxbound)
+        # translation_vector = np.array([0, -6, 0])
+        # cullbox.translate(translation_vector)  # By default, relative=True
         epcds = epcds.crop(cullbox)
 
     epcds_aabb = epcds.get_axis_aligned_bounding_box()
@@ -91,11 +84,10 @@ def rescale_point_cloud(nerf,viz=False,cull=False,verbose=False):
     if verbose:
         if not cull:
             print("Theoretical Bounding Box:")
-        print(f"Bounding Box: {bx}, {by}, {bz}")
+        print(f"Bounding Range: {bx}, {by}, {bz}")
         print(f"Minbound: {minbound}", f"Maxbound: {maxbound}")
 
     if viz:
-        # visualize the real-world scaled point cloud
         print(f"(2) Scaled Point Cloud:")
         o3d.visualization.draw_plotly([epcds])
 

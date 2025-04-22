@@ -489,7 +489,7 @@ def get_splat(map:str) -> GSplat:
     workspace_path = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
     main_dir_path = os.getcwd()
-    nerf_dir_path = os.path.join(workspace_path,"nerf_data")
+    nerf_dir_path = os.path.join(workspace_path,"gsplats")
 
     map_folder = os.path.join(nerf_dir_path,'outputs',map)
     for root, _, files in os.walk(map_folder):
