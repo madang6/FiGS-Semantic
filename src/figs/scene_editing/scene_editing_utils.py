@@ -1,30 +1,27 @@
 from __future__ import annotations
+
+# Standard library imports
+import os
+import itertools
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+import yaml
+
+# Third-party imports
 import numpy as np
 from numpy.typing import NDArray
-
-from typing import Any, Dict, List
-
 import torch
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import open3d as o3d
-
-from scipy.spatial import ConvexHull
-from scipy.spatial import Delaunay
-from scipy.spatial import cKDTree
+from scipy.spatial import ConvexHull, Delaunay, cKDTree
 from sklearn.neighbors import BallTree
 from sklearn.cluster import HDBSCAN
-
 import roma
 
-import itertools
-
+# Local application imports
 from figs.render.gsplat_semantic import GSplat
-
-from pathlib import Path
-from typing import List, Dict
-import numpy as np
-import torch
-import open3d as o3d
+from figs.visualize.plot_trajectories import *
 # from synthesize.scene_editing_utils import get_centroid
 
 # # # # #
@@ -57,11 +54,22 @@ def rescale_point_cloud(nerf,viz=False,cull=False,verbose=False):
         epcds.colors = o3d.utility.Vector3dVector(env_pcd_colors)
         # o3d.visualization.draw_plotly([epcds])
 
+    # Apply the inverse of the dataparser transform to the point cloud
     env_pcd_scaled = np.asarray(filtered_pcd.points).T / dataparser_scale
     env_pcd_scaled = np.vstack((env_pcd_scaled, np.ones((1, env_pcd_scaled.shape[1]))))
+
+    # Handle deprecated approach
+    if nerf.name.startswith("sv_"):
+        print("Special handling for sv_ prefix")
+        transform = torch.eye(4)
+        transform[:3,:] = dataparser_transform
+        invtransform = np.asarray(torch.linalg.inv(transform))
+
+        # ns-train dataparser scale&transform
+        # env_pcd_scaled = invtransform @ env_pcd_scaled
+        env_pcd_scaled = np.asarray(nerf.transforms_nerf["sfm_to_mocap_T"][0]["sfm_to_mocap_T"]) @ invtransform @ np.asarray(env_pcd_scaled)
     
     env_pcd_scaled = nerf.T_w2g @ env_pcd_scaled
-
     env_pcd_scaled = env_pcd_scaled[:3, :].T
 
     epcds = o3d.geometry.PointCloud()
@@ -691,3 +699,175 @@ def get_interpolated_gaussians(means_a: NDArray, means_b: NDArray,
     interpolated_quats = roma.utils.unitquat_slerp(quats_a, quats_b, torch.linspace(0, 1, steps).to(device))
         
     return interpolated_means, interpolated_quats
+
+def plot_point_cloud(simulator,
+                     ROs: Optional[Union[
+                            Tuple[np.ndarray, np.ndarray, np.ndarray],
+                            List[Tuple[np.ndarray, np.ndarray, np.ndarray]]]] = None,
+                     n_fr: Optional[int] = None):
+    def load_config_file(base_path, subfolder, filename):
+        config_path = os.path.join(base_path, subfolder)
+        for root, _, files in os.walk(config_path):
+            if filename in files:
+                with open(os.path.join(root, filename), 'r') as file:
+                    return yaml.safe_load(file), os.path.join(root, filename)
+        raise FileNotFoundError(f"{filename} not found in {config_path}")
+    
+    def _get_frame_segments(x: np.ndarray, scale: float) -> List[Tuple[np.ndarray,np.ndarray,str]]:
+        """
+        Given a 14-element state vector x (pos in x[0:3], quat in x[6:10]) 
+        and a scale, return (start, end, color) for each of the 3 body-axes.
+        """
+        dims = np.diag([0.6, 0.6, -0.2])   # same dims you used
+        frame_body = scale * dims
+        pos  = x[0:3]
+        quat = x[6:10]
+        R_mat = R.from_quat(quat).as_matrix()
+        colors = ["red","green","blue"]
+        segments = []
+        for j, col in enumerate(colors):
+            arm = R_mat @ frame_body[j,:]
+            if j == 2:
+                start = pos.copy()
+            else:
+                start = pos - arm
+            end = pos + arm
+            segments.append((start, end, col))
+        return segments
+
+    # Load scene configuration
+    config,cfg_path = load_config_file(
+        simulator.configs_path, 'course', f'{simulator.gsplat.name}.yml')
+
+    epcds, epcds_arr, epcds_bounds, pcd, pcd_mask, pcd_attr = rescale_point_cloud(simulator.gsplat)
+
+    pts  = np.asarray(epcds.points)
+    cols = np.clip(np.asarray(epcds.colors), 0, 1)
+    rgb  = (cols * 255).astype(int)
+    rgb_strs = [f"rgb({r},{g},{b})" for r,g,b in rgb]
+
+    # 2) Build the Figure with just the points
+    fig = go.Figure(layout=dict(width=1500, height=1500))
+    fig.add_trace(go.Scatter3d(
+        x=pts[:,0], y=pts[:,1], z=pts[:,2],
+        mode="markers",
+        marker=dict(size=2, color=rgb_strs),
+        showlegend=False
+    ))
+
+    # # 3) Now add each cylinder mesh
+    # for cyl in cylinders:
+    #     verts = np.asarray(cyl.vertices)
+    #     tris  = np.asarray(cyl.triangles)
+    #     # pick the uniform color you used in Open3D: [0, 0.5, 1.0] → rgb(0,128,255)
+    #     cyl_color = 'rgb(0,128,255)'
+    #     fig.add_trace(go.Mesh3d(
+    #         x=verts[:,0], y=verts[:,1], z=verts[:,2],
+    #         i=tris[:,0], j=tris[:,1], k=tris[:,2],
+    #         opacity=1.0,
+    #         color=cyl_color,
+    #         showlegend=False
+    #     ))
+
+    # # once you have your point cloud `pts` (N×3 array):
+    min_pt, max_pt = pts.min(axis=0), pts.max(axis=0)
+    center = (min_pt + max_pt) * 0.5
+
+    # 1) axis limits
+    # Get axis limits from config file if available
+    minbound = [float(x) if x not in [None, 'None'] else None for x in config.get('minbound', [None, None, None])]
+    maxbound = [float(x) if x not in [None, 'None'] else None for x in config.get('maxbound', [None, None, None])]
+    bounds = np.array([
+        [minbound[i] if minbound[i] is not None else pts[:, i].min(),
+            maxbound[i] if maxbound[i] is not None else pts[:, i].max()]
+        for i in range(3)
+    ])
+    xmin, xmax = bounds[0]
+    ymin, ymax = bounds[1]
+    zmin, zmax = bounds[2]
+    # zmin,zmax = -5,0
+    dx = xmax - xmin
+    dy = ymax - ymin
+    dz = zmax - zmin
+
+    # 2) camera (as before)
+    cam_R    = np.linalg.norm(pts - pts.mean(axis=0), axis=1).max() * 1.5
+    az, el = np.deg2rad(45), np.deg2rad(10)
+    eye = dict(
+    x=cam_R*np.cos(el)*np.cos(az),
+    y=cam_R*np.cos(el)*np.sin(az),
+    z=cam_R*np.sin(el)
+    )
+
+    if ROs is not None:
+        if isinstance(ROs, tuple):
+            ROs = [ROs]
+        traj_colors = ["red","green","blue","orange","purple","brown","pink","gray","olive","cyan"]
+        axis_len = np.linalg.norm([dx,dy,dz]) * 0.03
+
+        for i, RO in enumerate(ROs):
+            tXU = th.RO_to_tXU(RO)
+            x, y, z = tXU[1,:], tXU[2,:], tXU[3,:]
+            # spline path
+            fig.add_trace(go.Scatter3d(
+                x=x, y=y, z=z,
+                mode="lines",
+                line=dict(color=traj_colors[i%len(traj_colors)], width=4),
+                name=f"traj_{i}"
+            ))
+
+            # pick frames: start, end, and every n_fr
+            frame_idxs = {0, tXU.shape[1]-1}
+            if n_fr:
+                frame_idxs |= set(range(n_fr, tXU.shape[1], n_fr))
+
+            for idx_fr in sorted(frame_idxs):
+                xvec = tXU[1:14, idx_fr]           # same shape your quad_frame expects
+                for start, end, col in _get_frame_segments(xvec, axis_len):
+                    fig.add_trace(go.Scatter3d(
+                        x=[start[0], end[0]],
+                        y=[start[1], end[1]],
+                        z=[start[2], end[2]],
+                        mode="lines",
+                        line=dict(color=col, width=2),
+                        showlegend=False
+                    ))
+
+    # 3) update layout
+    if simulator.gsplat.name.startswith("sv_"):
+        fig.update_layout(
+        scene_camera=dict(eye=eye,
+                up=dict(x=0, y=0, z=1)),
+        scene=dict(
+            aspectmode="manual",
+            aspectratio=dict(x=dx, y=dy, z=dz),
+            xaxis=dict(title='x [m]',
+                    range=[xmin, xmax], autorange=False),
+            yaxis=dict(title='y [m]',
+                    range=[ymax, ymin], autorange=False),
+            zaxis=dict(title='z [m]',
+                    range=[zmax, zmin], autorange=False),
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        width=1500, height=1500,
+        showlegend=False
+        )
+    else:
+        fig.update_layout(
+        scene_camera=dict(eye=eye,
+                up=dict(x=0, y=0, z=1)),
+        scene=dict(
+            aspectmode="manual",
+            aspectratio=dict(x=dx, y=dy, z=dz),
+            xaxis=dict(title='',
+                    range=[xmin, xmax], autorange=False),
+            yaxis=dict(title='',
+                    range=[ymax, ymin], autorange=False),
+            zaxis=dict(title='',
+                    range=[zmax, zmin], autorange=False),
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        width=1500, height=1500,
+        showlegend=False
+        )
+    fig.show()

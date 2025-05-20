@@ -89,7 +89,9 @@ class VehicleRateMPC(BaseController):
         lbu,ubu = np.array(policy_config["bounds"]["lower"]),np.array(policy_config["bounds"]["upper"])
 
         # Derived Parameters
-        traj_config_pd = self.pad_trajectory(course_config,Nhn,hz_ctl)
+        if type(course) is str:
+            print("Padding trajectory for VehicleRateMPC.")
+            traj_config_pd = self.pad_trajectory(course_config,Nhn,hz_ctl)
         drn_spec = generate_specifications(frame_config)
         nx,nu = drn_spec["nx"], drn_spec["nu"]
 
@@ -100,15 +102,20 @@ class VehicleRateMPC(BaseController):
         # Compute Desired Trajectory
         # =====================================================================
 
-        # Solve Padded Trajectory
-        output = ms.solve(traj_config_pd)
-        if output is not False:
-            Tpi, CPi = output
+        if type(course) is str:
+            # Solve Padded Trajectory
+            start_time = time.time()
+            output = ms.solve(traj_config_pd)
+            if output is not False:
+                Tpi, CPi = output
+            else:
+                raise ValueError("Padded trajectory (for VehicleRateMPC) not feasible. Aborting.")
+            finish_time = time.time()
+            print(f"Time to solve trajectory: {finish_time-start_time:.6f} seconds")
+            # Convert to desired tXU
+            tXUd = th.TS_to_tXU(Tpi,CPi,drn_spec,hz_ctl)
         else:
-            raise ValueError("Padded trajectory (for VehicleRateMPC) not feasible. Aborting.")
-        
-        # Convert to desired tXU
-        tXUd = th.TS_to_tXU(Tpi,CPi,drn_spec,hz_ctl)
+            print("Bypassing trajectory optimization. Using provided trajectory.")
 
         # =====================================================================
         # Setup Acados Variables

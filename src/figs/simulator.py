@@ -1,6 +1,7 @@
 import os
 import shutil
 import json
+import yaml
 import torch
 import numpy as np
 import figs.utilities.trajectory_helper as th
@@ -62,15 +63,29 @@ class Simulator:
 
         # Instantiate empty attributes
         self.gsplat = None
-        self.conFiG = {"rollout":{},"drone":{}}
+        self.conFiG = {"rollout":{},"drone":{},"perception":{}}
         self.solver = None
 
         # Load the attributes
         self.load_scene(scene_name)
         self.load_rollout(rollout_name)
+        self.load_perception()
 
         if frame_name is not None:
             self.load_frame(frame_name)
+    
+    def load_perception(self):
+        with open(self.perception_path, 'r') as file:
+            perception_mode = yaml.safe_load(file)
+            visual_mode = perception_mode.get("visual_mode")
+            perception_mode = perception_mode.get("perception_mode")
+
+        if visual_mode not in ["rgb","semantic_depth"]:
+            raise ValueError(f"Invalid visual mode: {visual_mode}")
+        elif visual_mode == "semantic_depth":
+            self.conFiG["perception"] = "semantic_depth"
+        else:
+            self.conFiG["perception"] = "rgb"
 
     def load_scene(self, scene_name:str):
         """
@@ -173,12 +188,12 @@ class Simulator:
         self.conFiG["drone"] = drn_spec
     
     def simulate(self,policy:Type[BaseController],
-                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]=None
+                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray,str]|None=None,
                  ) -> Tuple[np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """
         Simulates the flight.
 
-        Args:
+#FIXME  Args:
             - t0:       Initial time.
             - tf:       Final time.
             - x0:       Initial state.
@@ -241,7 +256,11 @@ class Simulator:
                 # Get current image
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
-                icr = self.gsplat.render_rgb(camera,T_c2w)
+                
+                if self.perception == "semantic_depth":
+                    icr = self.gsplat.render(camera,T_c2w)
+                else:
+                    icr = self.gsplat.render_rgb(camera,T_c2w)
 
                 # Add sensor noise and syncronize estimated state
                 if use_fusion:

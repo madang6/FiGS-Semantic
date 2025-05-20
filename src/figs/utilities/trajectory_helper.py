@@ -91,8 +91,8 @@ def process_RRT_objectives(obj_targets, epcds_arr, env_bounds, radii, hoverMode=
     object_centroid = []
     
     for i, obj in enumerate(obj_targets):
-        r1 = radii[i][0]
-        r2 = radii[i][1]
+        r1 = radii[0][0] # Radius for generating circle points
+        r2 = radii[0][1] # Radius for querying points in the KDTree
         objctr = obj_targets[i].flatten()
 
         object_centroid.append(objctr)

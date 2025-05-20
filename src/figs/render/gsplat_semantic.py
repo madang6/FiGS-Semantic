@@ -34,6 +34,7 @@ class GSplat():
         """
         # Do some acrobatics to find necessary config files
         self.config_path = scene_config['path']
+        self.name = scene_config['name']
         current_path = self.config_path
         print(f"Current path dict: {current_path}")
         print(f"Current path name: {current_path.name}")
@@ -153,10 +154,52 @@ class GSplat():
 
         """
 
-        # Extract the camera to gsplat pose
-        T_c2g = self.dataparser_scale * self.T_w2g@T_c2w
-        P_c2g = torch.tensor(T_c2g[0:3,:]).float()
-        P_c2g[:3,:3]*=1/self.dataparser_scale
+        if self.name.startswith("sv_") and "sfm_to_mocap_T" in self.transforms_nerf:
+            # # print("Special handling for sv_ prefix")
+            # dataparser_scale = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale
+            # dataparser_transform = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform
+
+            # transform = torch.eye(4)
+            # transform[:3,:3] = dataparser_transform[:3,:3]
+
+            # T_c2g = dataparser_scale * np.linalg.inv(
+            #     np.asarray(self.transforms_nerf["sfm_to_mocap_T"][0]["sfm_to_mocap_T"])
+            #     ) @ T_c2w
+            
+            # # T_f2n = torch.tensor(self.T_w2g, dtype=torch.float32, device=T_c2w.device)
+            # T_c2g = self.T_w2g @ T_c2g
+            
+            # # P_c2n = T_c2n[0:3,:].clone().detach().float().requires_grad_(False)
+            # P_c2g = torch.tensor(T_c2g[0:3,:]).float()
+            # P_c2g[:3,:3]*=1/dataparser_scale
+
+            # 1) unpack
+            dp_scale     = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale
+            dp_transform = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform
+            sfm2mocap_T  = np.asarray(self.transforms_nerf["sfm_to_mocap_T"][0]["sfm_to_mocap_T"])
+            T_w2g        = self.T_w2g                            # 4×4
+
+            # 2) build the same A that you used on points
+            S = np.eye(4);      S[:3,:3] *= 1.0 / dp_scale      # scale
+            T_dp = np.eye(4);   T_dp[:3,:] = dp_transform        # dataparser
+            inv_dp = np.linalg.inv(T_dp)
+            M = sfm2mocap_T @ inv_dp
+
+            A = T_w2g @ M @ S
+
+            # 3) invert it
+            A_inv = np.linalg.inv(A)
+
+            # 4) send your camera through that inverse
+            T_c2g = A_inv @ T_c2w
+
+            # 5) grab the 3×4 for NeRF
+            P_c2g = torch.from_numpy(T_c2g[:3, :]).float()
+            
+        else:# Extract the camera to gsplat pose
+            T_c2g = self.dataparser_scale * self.T_w2g@T_c2w
+            P_c2g = torch.tensor(T_c2g[0:3,:]).float()
+            P_c2g[:3,:3]*=1/self.dataparser_scale
 
         # Render rgb image from the pose
         camera.camera_to_worlds = P_c2g[None,:3, ...]
