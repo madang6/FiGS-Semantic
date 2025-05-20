@@ -61,6 +61,9 @@ class Simulator:
         else:
             self.workspace_path = gsplats_path/'workspace'
 
+        # Set the perception path
+        self.perception_path = self.configs_path/"perception"/("perception_mode.yml")
+
         # Instantiate empty attributes
         self.gsplat = None
         self.conFiG = {"rollout":{},"drone":{},"perception":{}}
@@ -218,6 +221,8 @@ class Simulator:
         height,width,channels = cam_cfg["height"],cam_cfg["width"],cam_cfg["channels"]
         T_c2b = self.conFiG["drone"]["T_c2b"]
 
+        perception = self.conFiG["perception"]
+
         # Derived Variables
         n_sim2ctl = int(hz_sim/policy.hz)  # Number of simulation steps per control step
         mu_md = mu_md_s*(1/n_sim2ctl)           # Scale model mean noise to control rate
@@ -257,7 +262,7 @@ class Simulator:
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
                 
-                if self.perception == "semantic_depth":
+                if perception == "semantic_depth":
                     icr = self.gsplat.render(camera,T_c2w)
                 else:
                     icr = self.gsplat.render_rgb(camera,T_c2w)

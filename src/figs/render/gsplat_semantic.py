@@ -84,7 +84,7 @@ class GSplat():
             self.visual_mode = perception_mode.get("visual_mode")
             self.perception_mode = perception_mode.get("perception_mode")
 
-        if self.visual_mode not in ["static","dynamic","semantic_depth"]:
+        if self.visual_mode not in ["rgb","dynamic","semantic_depth"]:
             raise ValueError(f"Invalid visual mode: {self.visual_mode}")
         
         if self.visual_mode=="semantic_depth":
@@ -211,7 +211,8 @@ class GSplat():
         image_rgb = (255*image_rgb).astype(np.uint8)    # Convert to uint8
 
         return image_rgb
-    
+#TODO
+#FIXME Need to update this function to work correctly with SousVide-Semantic    
     def render(self, xcr:np.ndarray, xpr:np.ndarray=None,
                positives: Optional[str] = "",
                negatives: Optional[str] = "",
