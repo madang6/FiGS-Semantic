@@ -262,8 +262,9 @@ class Simulator:
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
                 
-                if perception == "semantic_depth":
-                    icr = self.gsplat.render(camera,T_c2w)
+                if perception == "semantic_depth" and obj is not None:
+                    img_dict = self.gsplat.render_rgb(camera,T_c2w,obj)
+                    icr = img_dict["semantic"]
                 else:
                     icr = self.gsplat.render_rgb(camera,T_c2w)
 
