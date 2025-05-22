@@ -6,6 +6,7 @@ import numpy as np
 import math
 
 from scipy.spatial.transform import Rotation
+from scipy.interpolate import CubicSpline
 from typing import Dict,Tuple,Union
 
 from figs.tsampling.rrt_datagen_v10 import *
