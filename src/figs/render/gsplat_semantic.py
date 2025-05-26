@@ -145,7 +145,7 @@ class GSplat():
         self,
         camera: Cameras,
         T_c2w: np.ndarray,
-        query: str = ""
+        query: Optional[str] = None
     ) -> Union[np.ndarray, Dict[str, np.ndarray]]:
         """
         Render an RGB (and optionally semantic) image from the GSplat pipeline.
@@ -153,12 +153,12 @@ class GSplat():
         Args:
             camera:          Camera object for the pipeline.
             T_c2w:           4×4 camera→world transform.
-            query:           A positive-language query for semantic filtering.
+            query:           Optional positive-language query for semantic filtering.
 
         Returns:
-            - If query=="", returns:
+            - If query is None, returns:
                 image_rgb: np.ndarray of shape (H,W,3), uint8
-            - If query!="", returns:
+            - If query is provided, returns:
                 {"rgb": image_rgb, "semantic": image_sem}, both uint8 np.ndarrays
         """
         
@@ -184,7 +184,7 @@ class GSplat():
         camera.camera_to_worlds = P_c2g[None, :, :]
         cameras = camera.to(self.device)
 
-        if query:
+        if query is not None:
             self.pipeline.model.viewer_utils.handle_language_queries(
                 raw_text=query,
                 is_positive=True
@@ -192,11 +192,10 @@ class GSplat():
 
         with torch.no_grad():
             
-            if query:
+            if query is not None:
                 outputs = self.pipeline.model.get_outputs_for_camera(
                     cameras,
                     obb_box=None,
-                    # sample_semantic_embeds=False,
                     compute_semantics=True
                 )
             else:
@@ -208,7 +207,7 @@ class GSplat():
         image_rgb = outputs["rgb"].cpu().numpy()
         image_rgb = (255 * image_rgb).astype(np.uint8)
 
-        if not query:
+        if query is None:
             return image_rgb
 
         sem = outputs.get(self.perception_mode, outputs.get("sem", outputs["rgb"]))

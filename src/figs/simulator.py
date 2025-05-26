@@ -191,7 +191,8 @@ class Simulator:
         self.conFiG["drone"] = drn_spec
     
     def simulate(self,policy:Type[BaseController],
-                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray,str]|None=None,
+                 t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]|None=None,
+                 query:str|None=None,
                  ) -> Tuple[np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """
         Simulates the flight.
@@ -262,8 +263,8 @@ class Simulator:
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
                 
-                if perception == "semantic_depth" and obj is not None:
-                    img_dict = self.gsplat.render_rgb(camera,T_c2w,obj)
+                if perception == "semantic_depth" and query is not None:
+                    img_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                     icr = img_dict["semantic"]
                 else:
                     icr = self.gsplat.render_rgb(camera,T_c2w)
