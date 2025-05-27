@@ -190,19 +190,25 @@ class GSplat():
                 is_positive=True
             )
 
-        with torch.no_grad():
+            # update the list of positives (objects)
+            self.pipeline.model.viewer_utils.handle_language_queries(
+                raw_text="",
+                is_positive=False)
             
-            if query is not None:
-                outputs = self.pipeline.model.get_outputs_for_camera(
-                    cameras,
-                    obb_box=None,
-                    compute_semantics=True
-                )
-            else:
-                outputs = self.pipeline.model.get_outputs_for_camera(
-                    cameras,
-                    obb_box=None
-                )
+            obb_box = None
+
+            with torch.no_grad():
+                try:
+                    outputs = self.pipeline.model.get_outputs_for_camera(
+                        cameras,
+                        obb_box=None,
+                        compute_semantics=True
+                    )
+                except:
+                    outputs = self.pipeline.model.get_outputs_for_camera(
+                        cameras,
+                        obb_box=None
+                    )
 
         image_rgb = outputs["rgb"].cpu().numpy()
         image_rgb = (255 * image_rgb).astype(np.uint8)
