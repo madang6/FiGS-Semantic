@@ -229,10 +229,12 @@ def generate_rrt_paths(
 
     trajset = {}
     all_cylinder_lists = []
-    for (target, pose, centroid) in zip(objectives, obj_targets, semantic_centroid):
+    for i, (target, pose, centroid) in enumerate(zip(objectives, obj_targets, semantic_centroid)):
+        r1 = config.get('radii')[i][0]
+        r2 = config.get('radii')[i][1]
+
         pose = pose.flatten()
-        # pose[2] = -1.1
-        # pose[2] = config.get('altitude', -1.1)
+        pose[2] = -1.1
         # print(f"shape of pose: {pose.shape}")
         print(f"target: {target}")
         print(f"pose: {pose}")
@@ -242,16 +244,19 @@ def generate_rrt_paths(
             env_pts=pcd,
             start=pose[:2],
             obj=centroid[:2],
+            # bounds=ebounds,
             bounds=[
             (config.get('minbound', [None, None])[0], config.get('maxbound', [None, None])[0]),
             (config.get('minbound', [None, None])[1], config.get('maxbound', [None, None])[1])
             ],
-            altitude=config.get('altitude',-1.3),
+            altitude=config.get('altitudes',-1.3)[i],
+            # altitude=pose[2],
             dimension=dimension,
-            step_size=0.5,
-            collision_check_radius=config.get('r2', 0.5),
-            collision_check_resolution=0.1,
-            max_iter=Niter_RRT,
+            step_size=config.get('step_size', 1.0),
+            collision_check_radius=r2,
+            goal_exclusion_radius=r1,
+            collision_check_resolution=config.get('collision_check_resolution', 0.1),
+            max_iter=config.get('N', Niter_RRT),
             exact_step=exact_step,
             bounded_step=bounded_step,
             algorithm=algorithm_input,  # Pass the selected algorithm
@@ -348,6 +353,40 @@ def generate_rrt_paths(
                 showlegend=False
             ))
 
+            # fetch radii from config (with defaults)
+            # r2 = float(config.get('r2', 0.5))
+            # r1 = float(config.get('r1', 0.0))   # or some default if you prefer
+            z_plane = pose[2]                   # or whatever height you want the circles at
+
+            # parameters for circle resolution
+            theta = np.linspace(0, 2*np.pi, 200)
+
+            #  centroid
+            x2 = pose[0] + r2 * np.cos(theta)
+            y2 = pose[1] + r2 * np.sin(theta)
+            z2 = np.full_like(theta, z_plane)
+
+            # start node
+            x1 = centroid[0] + r1 * np.cos(theta)
+            y1 = centroid[1] + r1 * np.sin(theta)
+            z1 = np.full_like(theta, z_plane)
+
+            fig.add_trace(go.Scatter3d(
+                x=x1, y=y1, z=z1,
+                mode='lines',
+                line=dict(color='orange', width=4),
+                name=f'Object Exclusion Radius={r1}',
+                showlegend=False
+            ))
+
+            fig.add_trace(go.Scatter3d(
+                x=x2, y=y2, z=z2,
+                mode='lines',
+                line=dict(color='red', width=4),
+                name=f'Goal Exclusion Radius={r2}',
+                showlegend=False
+            ))
+        
     # # once you have your point cloud `pts` (N×3 array):
     min_pt, max_pt = pts.min(axis=0), pts.max(axis=0)
     center = (min_pt + max_pt) * 0.5

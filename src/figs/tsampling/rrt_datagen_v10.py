@@ -15,7 +15,7 @@ class Node:
 
 class RRT:
     def __init__(self, env_arr, env_pts, start, obj, bounds, altitude, algorithm='RRT', dimension=2, step_size=1.0, max_iter=10000,
-                 collision_check_radius=0.5, collision_check_resolution=0.1, exact_step=False, bounded_step = False, prevent_edge_overlap=False):
+                  collision_check_radius=0.5, goal_exclusion_radius=0.5, collision_check_resolution=0.1, exact_step=False, bounded_step = False, prevent_edge_overlap=False):
         self.env_pts = env_pts
         self.env_arr = env_arr
         # print(f"Environment Points: {self.env_arr.shape}")
@@ -30,10 +30,13 @@ class RRT:
         self.prevent_edge_overlap = prevent_edge_overlap
         self.goal_node = Node(np.array(start))
         self.bounds = bounds          # Bounds of the environment: List of (min, max) tuples for each dimension
-        self.obj_exclusion_radius = collision_check_radius  # Set the exclusion radius for the object node
+        self.obj_exclusion_radius = goal_exclusion_radius  # Set the exclusion radius for the object node
         self.obj_exclusion = (np.array(obj), self.obj_exclusion_radius)
         print(f"Object Exclusion: {self.obj_exclusion}")
-        self.goal_exclusion_radius = 0.7  # Set the exclusion radius for the goal node
+        # self.obj_exclusion_radius = 1.4  # Set the exclusion radius for the object node
+        # self.obj_exclusion = (np.array(obj), self.obj_exclusion_radius)
+        # print(f"Object Exclusion: {self.obj_exclusion}")
+        self.goal_exclusion_radius = collision_check_radius  # Set the exclusion radius for the goal node
         self.goal_exclusion = (self.goal_node.position, self.goal_exclusion_radius)
         self.step_size = step_size
         self.collision_check_resolution = collision_check_resolution
