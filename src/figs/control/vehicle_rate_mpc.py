@@ -116,7 +116,7 @@ class VehicleRateMPC(BaseController):
             tXUd = th.TS_to_tXU(Tpi,CPi,drn_spec,hz_ctl)
         else:
             print("Bypassing trajectory optimization. Using provided trajectory.")
-            tXUd = course
+            tXUd = np.vstack((course[0:11, :], course[14:18, :]))
 
         # =====================================================================
         # Setup Acados Variables
@@ -145,7 +145,7 @@ class VehicleRateMPC(BaseController):
         # Initialize Acados Solver
         ocp.solver_options.N_horizon = Nhn
         ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
-        ocp.solver_options.hessian_approx = 'EXACT'
+        ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
         ocp.solver_options.integrator_type = 'IRK'
         ocp.solver_options.sim_method_newton_iter = 10
 
@@ -297,40 +297,6 @@ class VehicleRateMPC(BaseController):
 
         return fout_wps_pd
 
-    # def get_ydes(self,tcr:float,xcr:np.ndarray) -> np.ndarray:
-    #     """
-    #     Method to get the section of the desired trajectory at the current time.
-
-    #     Args:
-    #         - tcr: Time at the current control step.
-    #         - xcr: States at the current control step.
-
-    #     Returns:
-    #         - ydes:   Desired trajectory section at the current time.
-
-    #     """
-    #     # Get relevant portion of trajectory
-    #     idx_i = int(self.hz*tcr)
-    #     Nhn_lim = self.tXUd.shape[1]-self.solver.acados_ocp.dims.N-1
-    #     ks0 = np.clip(idx_i-self.ns,0,Nhn_lim-1)
-    #     ksf = np.clip(idx_i+self.ns,0,Nhn_lim)
-    #     Xi = self.tXUd[1:11,ks0:ksf]
-        
-    #     # Find index of nearest state
-    #     dXi = Xi-xcr.reshape(-1,1)
-    #     wl2_dXi = np.array([x.T@self.Ws@x for x in dXi.T])
-    #     idx0 = ks0 + np.argmin(wl2_dXi)
-    #     idxf = idx0 + self.solver.acados_ocp.dims.N+1
-
-    #     # Pad if idxf is greater than the last index
-    #     if idxf < self.tXUd.shape[1]:
-    #         ydes = self.tXUd[1:,idx0:idxf]
-    #     else:
-    #         print("Warning: VehicleRateMPC.get_ydes() padding trajectory. Increase your padding horizon.")
-    #         ydes = self.tXUd[1:,idx0:]
-    #         ydes = np.hstack((ydes,np.tile(ydes[:,-1:],(1,idxf-self.tXUd.shape[1]))))
-
-    #     return ydes
     def get_ydes(self,tcr:float,xcr:np.ndarray) -> np.ndarray:
         """
         Method to get the section of the desired trajectory at the current time.
@@ -358,27 +324,61 @@ class VehicleRateMPC(BaseController):
 
         # Pad if idxf is greater than the last index
         if idxf < self.tXUd.shape[1]:
-            xdes = self.tXUd[1:11,idx0:idxf]
-
-            ufdes = -np.mean(self.tXUd[14:18,idx0:idxf],axis=0)
-            uwdes = self.tXUd[11:14,idx0:idxf]
-
-            ydes = np.vstack((
-                xdes,
-                ufdes,
-                uwdes))
+            ydes = self.tXUd[1:,idx0:idxf]
         else:
             print("Warning: VehicleRateMPC.get_ydes() padding trajectory. Increase your padding horizon.")
-            xdes = self.tXUd[1:11,idx0:]
-
-            ufdes = -np.mean(self.tXUd[14:18,idx0:],axis=0)
-            uwdes = self.tXUd[11:14,idx0:]
-
-            ydes = np.vstack((
-                xdes,
-                ufdes,
-                uwdes))
-
+            ydes = self.tXUd[1:,idx0:]
             ydes = np.hstack((ydes,np.tile(ydes[:,-1:],(1,idxf-self.tXUd.shape[1]))))
 
         return ydes
+    # def get_ydes(self,tcr:float,xcr:np.ndarray) -> np.ndarray:
+    #     """
+    #     Method to get the section of the desired trajectory at the current time.
+
+    #     Args:
+    #         - tcr: Time at the current control step.
+    #         - xcr: States at the current control step.
+
+    #     Returns:
+    #         - ydes:   Desired trajectory section at the current time.
+
+    #     """
+    #     # Get relevant portion of trajectory
+    #     idx_i = int(self.hz*tcr)
+    #     Nhn_lim = self.tXUd.shape[1]-self.solver.acados_ocp.dims.N-1
+    #     ks0 = np.clip(idx_i-self.ns,0,Nhn_lim-1)
+    #     ksf = np.clip(idx_i+self.ns,0,Nhn_lim)
+    #     Xi = self.tXUd[1:11,ks0:ksf]
+        
+    #     # Find index of nearest state
+    #     dXi = Xi-xcr.reshape(-1,1)
+    #     wl2_dXi = np.array([x.T@self.Ws@x for x in dXi.T])
+    #     idx0 = ks0 + np.argmin(wl2_dXi)
+    #     idxf = idx0 + self.solver.acados_ocp.dims.N+1
+
+    #     # Pad if idxf is greater than the last index
+    #     if idxf < self.tXUd.shape[1]:
+    #         xdes = self.tXUd[1:11,idx0:idxf]
+
+    #         ufdes = self.tXUd[14:18,idx0:idxf]
+    #         uwdes = self.tXUd[11:14,idx0:idxf]
+
+    #         ydes = np.vstack((
+    #             xdes,
+    #             ufdes))
+    #             # uwdes))
+    #     else:
+    #         print("Warning: VehicleRateMPC.get_ydes() padding trajectory. Increase your padding horizon.")
+    #         xdes = self.tXUd[1:11,idx0:]
+
+    #         ufdes = self.tXUd[14:18,idx0:]
+    #         uwdes = self.tXUd[11:14,idx0:]
+
+    #         ydes = np.vstack((
+    #             xdes,
+    #             ufdes))
+    #             # uwdes))
+
+    #         ydes = np.hstack((ydes,np.tile(ydes[:,-1:],(1,idxf-self.tXUd.shape[1]))))
+
+    #     return ydes
