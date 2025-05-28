@@ -73,59 +73,97 @@ def set_RRT_altitude(paths, goal_z):
 
     return updated_paths
 
-def process_RRT_objectives(obj_targets, epcds_arr, env_bounds, radii, hoverMode=False):
+def process_RRT_objectives(obj_targets, epcds_arr, env_bounds, radii, altitudes, hoverMode=False):
     """
-    Process the object targets and return updated obj_targets and obj_centroid.
-
-    Parameters:
-        obj_targets (list of np.ndarray): The original object targets.
-        epcds_arr (np.ndarray): The point cloud data for KDTree creation.
-        env_bounds (dict): The environment bounds with "minbound" and "maxbound".
-        r1 (float): Radius for generating circle points.
-        r2 (float): Radius for querying points in the KDTree.
-        hoverMode (bool): Whether hover mode is enabled.
-
-    Returns:
-        tuple: (new_obj_targets, object_centroid)
+    Process the object targets and return updated obj_targets and obj_centroid,
+    with detailed printouts of free_pts extents and bound-rejection reasons.
     """
-    new_obj_targets = obj_targets.copy()  # Create a copy to avoid modifying in place
+    new_obj_targets = obj_targets.copy()
     object_centroid = []
     
     for i, obj in enumerate(obj_targets):
-        r1 = radii[0][0] # Radius for generating circle points
-        r2 = radii[0][1] # Radius for querying points in the KDTree
-        objctr = obj_targets[i].flatten()
-
+        print(f"\n--- Processing object {i} ---")
+        r1, r2 = radii[i]
+        objctr = obj.flatten()
+        print(f" Centroid: {objctr}, r1={r1:.3f}, r2={r2:.3f}")
         object_centroid.append(objctr)
 
-        # Generate points along the circle
-        theta = np.linspace(0, 2 * np.pi, 100)
-        goal_zs = objctr[2]*np.ones_like(theta)
-        circle_points = np.array([objctr[0] + r1 * np.cos(theta), objctr[1] + r1 * np.sin(theta)]).T
-        circle_points = np.hstack((circle_points, goal_zs.reshape(-1, 1)))
+        # Sample circle around centroid
+        theta = np.linspace(0, 2*np.pi, 100)
+        z_vals = np.full_like(theta, altitudes[i])
+        circle_pts = np.vstack([
+            objctr[0] + r1*np.cos(theta),
+            objctr[1] + r1*np.sin(theta),
+            z_vals
+        ]).T
 
-        # Create a KDTree for the point cloud
+        # Find free points (no obstacle within r2)
         kdtree = cKDTree(epcds_arr.T)
+        free_pts = [p for p in circle_pts
+                    if not kdtree.query_ball_point(p, r2, eps=0.05, workers=-1)]
+        print(f" Found {len(free_pts)} free_pts (no obstacles within r2)")
 
-        # Check for points in the point cloud within radius r2 of any point along the circle
-        valid_points = []
-        for point in circle_points:
-            idx = kdtree.query_ball_point(point, r2, eps=0.05, workers=-1)
-            if len(idx) == 0:
-                valid_points.append(point)
-        
-        if valid_points:
-            # Ensure new_position is within env_bounds
-            valid_points_within_bounds = [
-                point for point in valid_points
-                if env_bounds["minbound"][0] <= point[0] <= env_bounds["maxbound"][0] and
-                   env_bounds["minbound"][1] <= point[1] <= env_bounds["maxbound"][1] and
-                   env_bounds["minbound"][2] <= point[2] <= env_bounds["maxbound"][2]
-            ]
-            if valid_points_within_bounds:
-                new_position = min(valid_points_within_bounds, key=lambda point: abs(point[0] - object_centroid[i][0]))
-                new_obj_targets[i] = new_position
+        if not free_pts:
+            print("  → No free_pts found. Try reducing r2 or r1.")
+            continue
 
+        # Compute and print extents of free_pts
+        arr = np.array(free_pts)
+        x_min, x_max = arr[:,0].min(), arr[:,0].max()
+        y_min, y_max = arr[:,1].min(), arr[:,1].max()
+        z_min, z_max = arr[:,2].min(), arr[:,2].max()
+        print(f"  free_pts extents:")
+        print(f"    x ∈ [{x_min:.3f}, {x_max:.3f}], y ∈ [{y_min:.3f}, {y_max:.3f}], z ∈ [{z_min:.3f}, {z_max:.3f}]")
+
+        # Print environment bounds
+        minb = env_bounds["minbound"]
+        maxb = env_bounds["maxbound"]
+        print(f"  env_bounds:")
+        print(f"    x ∈ [{minb[0]:.3f}, {maxb[0]:.3f}], "
+              f"y ∈ [{minb[1]:.3f}, {maxb[1]:.3f}], "
+              f"z ∈ [{minb[2]:.3f}, {maxb[2]:.3f}]")
+
+        # Count why points are out of bounds
+        x_low  = np.sum(arr[:,0] < minb[0])
+        x_high = np.sum(arr[:,0] > maxb[0])
+        y_low  = np.sum(arr[:,1] < minb[1])
+        y_high = np.sum(arr[:,1] > maxb[1])
+        z_low  = np.sum(arr[:,2] < minb[2])
+        z_high = np.sum(arr[:,2] > maxb[2])
+        total_out = x_low + x_high + y_low + y_high + z_low + z_high
+        if total_out > 0:
+            print("  Rejection summary (out-of-bounds counts):")
+            if x_low:  print(f"    {x_low} pts with x < {minb[0]:.3f}")
+            if x_high: print(f"    {x_high} pts with x > {maxb[0]:.3f}")
+            if y_low:  print(f"    {y_low} pts with y < {minb[1]:.3f}")
+            if y_high: print(f"    {y_high} pts with y > {maxb[1]:.3f}")
+            if z_low:  print(f"    {z_low} pts with z < {minb[2]:.3f}")
+            if z_high: print(f"    {z_high} pts with z > {maxb[2]:.3f}")
+        else:
+            print("  No free_pts are out-of-bounds in any axis.")
+
+        # Filter to in-bounds
+        in_bounds = [
+            p for p in free_pts
+            if (minb[0] <= p[0] <= maxb[0] and
+                minb[1] <= p[1] <= maxb[1] and
+                minb[2] <= p[2] <= maxb[2])
+        ]
+        print(f" {len(in_bounds)} points remain inside env bounds")
+
+        if not in_bounds:
+            print("  → All free_pts were out-of-bounds; consider:")
+            print("     * increasing env_bounds or")
+            print("     * decreasing r1 to sample closer to centroid\n")
+            continue
+
+        # Choose the candidate closest in x to original centroid
+        new_pos = min(in_bounds, key=lambda p: np.linalg.norm(p))
+        print(f"  → Selected new target: {new_pos}")
+
+        new_obj_targets[i] = new_pos
+
+    print("\nFinished processing all objects.")
     return new_obj_targets, object_centroid
 
 def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):

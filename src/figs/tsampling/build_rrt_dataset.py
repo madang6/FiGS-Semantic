@@ -17,7 +17,79 @@ import figs.scene_editing.scene_editing_utils as scdt
 import figs.utilities.trajectory_helper as th
 from figs.tsampling.rrt_datagen_v10 import *
 
-def get_objectives(nerf:GSplat, objectives, viz=False):
+def get_objectives(nerf:GSplat, object_names, similarities, viz=False):
+    # Transformation from data parser
+    world_transform = torch.eye(4)
+    scale = nerf.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale
+    transform = nerf.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform
+    world_transform[:3, :3] = transform[:3, :3]
+    world_inv_transform = np.asarray(torch.linalg.inv(world_transform))
+
+    # Get environment point cloud
+    env_pcd_dict, env_pcd_array, env_bounds, env_pcd_o3d, env_pcd_mask, env_pcd_attr = scdt.rescale_point_cloud(nerf, viz=viz)
+
+    object_world_positions = []
+
+    for idx, object_name in enumerate(object_names):
+        print('*' * 50)
+        print(f'Processing Object: {object_name}')
+        print('*' * 50)
+
+        # Object detection parameters
+        similarity_threshold = similarities[idx][0]
+        filter_radius = similarities[idx][1]
+        threshold_list = [similarity_threshold] * len(object_names)
+        radius_list = [filter_radius] * len(object_names)
+
+        centroid, z_bounds, filtered_pcd, mask, attrs = scdt.get_centroid(
+            nerf=nerf,
+            env_pcd=env_pcd_o3d,
+            pcd_attr=env_pcd_attr,
+            positives=object_name,
+            negatives='window,wall,floor,ceiling',
+            # negatives='q,t,g,r',
+            threshold=threshold_list[idx],
+            visualize_pcd=False,
+            enable_convex_hull=True,
+            enable_spherical_filter=True,
+            enable_clustering=False,
+            filter_radius=radius_list[idx],
+            obj_priors={},
+            use_Mahalanobis_distance=True
+        )
+
+        points = np.asarray(filtered_pcd.points)[mask]
+        colors = np.asarray(filtered_pcd.colors)[mask]
+        similarity = attrs['raw_similarity'][mask].cpu().numpy()
+
+        object_pcd = o3d.geometry.PointCloud()
+        object_pcd.points = o3d.utility.Vector3dVector(points[:, :3])
+        object_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        if viz:
+            o3d.visualization.draw_plotly([object_pcd])
+
+        # Outlier removal
+        object_pcd, _ = object_pcd.remove_radius_outlier(nb_points=30, radius=0.03)
+
+        object_world_positions.append(centroid)
+
+    # Transform centroids to world coordinates
+    for i in range(len(object_world_positions)):
+        position = object_world_positions[i].reshape(3, -1)
+        position /= scale
+        position = np.vstack((position, np.ones((1, position.shape[1]))))
+
+        if nerf.name.startswith("sv_"):
+            sfm_to_mocap = np.asarray(nerf.transforms_nerf["sfm_to_mocap_T"][0]["sfm_to_mocap_T"])
+            position = sfm_to_mocap @ world_inv_transform @ position
+
+        position = nerf.T_w2g @ position
+        object_world_positions[i] = position[:3, :].T
+
+    return object_world_positions, env_bounds, env_pcd_dict, env_pcd_array
+
+def get_objectives_old(nerf:GSplat, objectives, similarities, viz=False):
     # viz=visualize
     transform = torch.eye(4)
     dataparser_scale = nerf.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale
@@ -29,19 +101,19 @@ def get_objectives(nerf:GSplat, objectives, viz=False):
 
     # Translate to gemsplat syntax
     positives = objectives
-    threshold = 0.6 #Currently may be overloaded within get_points()
-    filter_radius = 0.075 #Currently may be overloaded within get_points()
-    filter_radius = [filter_radius] * len(objectives)
-
-    threshold_obj = [threshold] * len(objectives)
     
     obj_targets = []
 
     for idx, obj in enumerate(objectives):
-
         print('*' * 50)
         print(f'Processing Object: {obj}')
         print('*' * 50)
+
+        threshold = similarities[0] #Currently may be overloaded within get_points()
+        filter_radius = similarities[1] #Currently may be overloaded within get_points()
+        filter_radius = [filter_radius] * len(objectives)
+
+        threshold_obj = [threshold] * len(objectives)
 
         # source location
         src_centroid, src_z_bounds, scene_pcd, similarity_mask, other_attr = scdt.get_centroid(nerf=nerf,
@@ -303,55 +375,57 @@ def generate_rrt_paths(
                     cyl.paint_uniform_color([0,0.5,1.0])
                     cylinders.append(cyl)
         all_cylinder_lists.append(cylinders)
+
+        trajset[target] = paths
         
-    pts  = np.asarray(pcd.points)
-    cols = np.clip(np.asarray(pcd.colors), 0, 1)
-    rgb  = (cols * 255).astype(int)
-    rgb_strs = [f"rgb({r},{g},{b})" for r,g,b in rgb]
+        pts  = np.asarray(pcd.points)
+        cols = np.clip(np.asarray(pcd.colors), 0, 1)
+        rgb  = (cols * 255).astype(int)
+        rgb_strs = [f"rgb({r},{g},{b})" for r,g,b in rgb]
 
-    # 2) Build the Figure with just the points
-    fig = go.Figure(layout=dict(width=1000, height=1000))
-    fig.add_trace(go.Scatter3d(
-        x=pts[:,0], y=pts[:,1], z=pts[:,2],
-        mode="markers",
-        marker=dict(size=2, color=rgb_strs),
-        showlegend=False
-    ))
+        # 2) Build the Figure with just the points
+        fig = go.Figure(layout=dict(width=1000, height=1000))
+        fig.add_trace(go.Scatter3d(
+            x=pts[:,0], y=pts[:,1], z=pts[:,2],
+            mode="markers",
+            marker=dict(size=2, color=rgb_strs),
+            showlegend=False
+        ))
 
-    # # Radius
-    # xc, yc = pose[0], pose[1]
-    # r1     = config.get("r1")
-    # # the Z‐height you want the circle drawn at—e.g. the same as your camera “ground” plane
-    # zc     = config.get('altitude',-1.1)    # or use 0 if you want it on the ground
-    # θ = np.linspace(0, 2*np.pi, 200)
-    # xs = xc + r1 * np.cos(θ)
-    # ys = yc + r1 * np.sin(θ)
-    # zs = np.full_like(θ, zc)
-    # fig.add_trace(go.Scatter3d(
-    #     x=xs, y=ys, z=zs,
-    #     mode="lines",
-    #     line=dict(
-    #         color="black",     # or whatever color you like
-    #         dash="dash",       # dashed style
-    #         width=4
-    #     ),
-    #     showlegend=False
-    # ))
-    
-    if not config.get('gif'):
-        # 3) Now add each cylinder mesh
-        for cyl in cylinders:
-            verts = np.asarray(cyl.vertices)
-            tris  = np.asarray(cyl.triangles)
-            # pick the uniform color you used in Open3D: [0, 0.5, 1.0] → rgb(0,128,255)
-            cyl_color = 'rgb(0,128,255)'
-            fig.add_trace(go.Mesh3d(
-                x=verts[:,0], y=verts[:,1], z=verts[:,2],
-                i=tris[:,0], j=tris[:,1], k=tris[:,2],
-                opacity=1.0,
-                color=cyl_color,
-                showlegend=False
-            ))
+        # # Radius
+        # xc, yc = pose[0], pose[1]
+        # r1     = config.get("r1")
+        # # the Z‐height you want the circle drawn at—e.g. the same as your camera “ground” plane
+        # zc     = config.get('altitude',-1.1)    # or use 0 if you want it on the ground
+        # θ = np.linspace(0, 2*np.pi, 200)
+        # xs = xc + r1 * np.cos(θ)
+        # ys = yc + r1 * np.sin(θ)
+        # zs = np.full_like(θ, zc)
+        # fig.add_trace(go.Scatter3d(
+        #     x=xs, y=ys, z=zs,
+        #     mode="lines",
+        #     line=dict(
+        #         color="black",     # or whatever color you like
+        #         dash="dash",       # dashed style
+        #         width=4
+        #     ),
+        #     showlegend=False
+        # ))
+        
+        if not config.get('gif'):
+            # 3) Now add each cylinder mesh
+            for cyl in cylinders:
+                verts = np.asarray(cyl.vertices)
+                tris  = np.asarray(cyl.triangles)
+                # pick the uniform color you used in Open3D: [0, 0.5, 1.0] → rgb(0,128,255)
+                cyl_color = 'rgb(0,128,255)'
+                fig.add_trace(go.Mesh3d(
+                    x=verts[:,0], y=verts[:,1], z=verts[:,2],
+                    i=tris[:,0], j=tris[:,1], k=tris[:,2],
+                    opacity=1.0,
+                    color=cyl_color,
+                    showlegend=False
+                ))
 
             # fetch radii from config (with defaults)
             # r2 = float(config.get('r2', 0.5))
@@ -386,192 +460,190 @@ def generate_rrt_paths(
                 name=f'Goal Exclusion Radius={r2}',
                 showlegend=False
             ))
-        
-    # # once you have your point cloud `pts` (N×3 array):
-    min_pt, max_pt = pts.min(axis=0), pts.max(axis=0)
-    center = (min_pt + max_pt) * 0.5
+            
+        # # once you have your point cloud `pts` (N×3 array):
+        min_pt, max_pt = pts.min(axis=0), pts.max(axis=0)
+        center = (min_pt + max_pt) * 0.5
 
-    # 1) axis limits
-    # Get axis limits from config file if available
-    minbound = [float(x) if x not in [None, 'None'] else None for x in config.get('minbound', [None, None, None])]
-    maxbound = [float(x) if x not in [None, 'None'] else None for x in config.get('maxbound', [None, None, None])]
-    bounds = np.array([
-        [minbound[i] if minbound[i] is not None else pts[:, i].min(),
-            maxbound[i] if maxbound[i] is not None else pts[:, i].max()]
-        for i in range(3)
-    ])
-    xmin, xmax = bounds[0]
-    ymin, ymax = bounds[1]
-    zmin, zmax = bounds[2]
-    # zmin,zmax = -5,0
-    dx = xmax - xmin
-    dy = ymax - ymin
-    dz = zmax - zmin
+        # 1) axis limits
+        # Get axis limits from config file if available
+        minbound = [float(x) if x not in [None, 'None'] else None for x in config.get('minbound', [None, None, None])]
+        maxbound = [float(x) if x not in [None, 'None'] else None for x in config.get('maxbound', [None, None, None])]
+        bounds = np.array([
+            [minbound[i] if minbound[i] is not None else pts[:, i].min(),
+                maxbound[i] if maxbound[i] is not None else pts[:, i].max()]
+            for i in range(3)
+        ])
+        xmin, xmax = bounds[0]
+        ymin, ymax = bounds[1]
+        zmin, zmax = bounds[2]
+        # zmin,zmax = -5,0
+        dx = xmax - xmin
+        dy = ymax - ymin
+        dz = zmax - zmin
 
-    # 2) camera (as before)
-    R    = np.linalg.norm(pts - pts.mean(axis=0), axis=1).max() * 1.5
-    az, el = np.deg2rad(45), np.deg2rad(10)
-    eye = dict(
-    x=R*np.cos(el)*np.cos(az),
-    y=R*np.cos(el)*np.sin(az),
-    z=R*np.sin(el)
-    )
-
-    # 3) update layout
-    if simulator.gsplat.name.startswith("sv_"):
-        fig.update_layout(
-        scene_camera=dict(eye=eye,
-                up=dict(x=0, y=0, z=1)),
-        scene=dict(
-            aspectmode="manual",
-            aspectratio=dict(x=dx, y=dy, z=dz),
-            xaxis=dict(title='',
-                    range=[xmin, xmax], autorange=False,
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False,
-            showbackground=False,),
-            yaxis=dict(title='',
-                    range=[ymax, ymin], autorange=False,
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False,
-            showbackground=False,),
-            zaxis=dict(title='',
-                    range=[zmax, zmin], autorange=False,
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False,
-            showbackground=False,),
-        ),
-        margin=dict(l=0, r=0, t=0, b=0),
-        width=1000, height=1000,
-        showlegend=False
-        )
-    else:
-        fig.update_layout(
-        scene_camera=dict(eye=eye,
-                up=dict(x=0, y=0, z=1)),
-        scene=dict(
-            aspectmode="manual",
-            aspectratio=dict(x=dx, y=dy, z=dz),
-            xaxis=dict(title='',
-                    range=[xmin, xmax], autorange=False,
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False,
-            showbackground=False,),
-            yaxis=dict(title='',
-                    range=[ymax, ymin], autorange=False,
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False,
-            showbackground=False,),
-            zaxis=dict(title='',
-                    range=[zmax, zmin], autorange=False,
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False,
-            showbackground=False,)
-        ),
-        margin=dict(l=0, r=0, t=0, b=0),
-        width=1000, height=1000,
-        showlegend=False
+        # 2) camera (as before)
+        R    = np.linalg.norm(pts - pts.mean(axis=0), axis=1).max() * 1.5
+        az, el = np.deg2rad(45), np.deg2rad(10)
+        eye = dict(
+        x=R*np.cos(el)*np.cos(az),
+        y=R*np.cos(el)*np.sin(az),
+        z=R*np.sin(el)
         )
 
-    if not config.get('gif'):
-        print("Rendering the figure...")
-        fig.show()
-
-    if config.get('gif'):
-        # --- 4) Render & save each frame ---
-        out_dir = "/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space"
-        os.makedirs(out_dir, exist_ok=True)
-
-        cam = fig.layout.scene.camera
-        off_x = cam.eye.x - center[0]
-        off_y = cam.eye.y - center[1]
-        off_z = cam.eye.z - center[2]
-
-        # 3) Compute your radius in that XY‐offset plane
-        r = np.sqrt(off_x**2 + off_y**2) * 1   # distance from center to camera in XY
-        # (keep the same vertical offset)
-        z_offset = off_z                  # camera’s height above center
-
-        n_frames = 60
-        angles   = np.linspace(0, 360, n_frames, endpoint=False)
-        png_paths = []
-        # for i, ang in enumerate(angles):
-        #     θ = np.deg2rad(ang)
-        #     # build the *absolute* eye = center + offset
-        #     new_eye = dict(
-        #         x = center[0] + r * np.cos(θ),
-        #         y = center[1] + r * np.sin(θ),
-        #         z = center[2] + z_offset
-        #     )
-        #     fig.update_layout(scene_camera=dict(eye=new_eye))
-        #     path = f"{out_dir}/frame_{i:03d}.png"
-        #     fig.write_image(path, width=1000, height=1000)
-        #     png_paths.append(path)
-        num_trees = len(all_cylinder_lists)
-        color_list = ["purple", "orange", "cyan"]  # len == num_trees
-        # define at which frames you switch
-        # e.g. switch twice means three segments:
-        switch_points = [0,
-                        n_frames//3,
-                        2*n_frames//3,
-                        n_frames]  # segments: [0..20),[20..40),[40..60)
-        for i, ang in enumerate(np.linspace(0,360,n_frames,endpoint=False)):
-            # decide which segment we’re in
-            seg = next(j for j in range(len(switch_points)-1)
-                    if switch_points[j] <= i < switch_points[j+1])
-            cyl_list = all_cylinder_lists[seg]  # select the tree for this segment
-            tree_col  = color_list[seg]
-
-            # clear any old cylinder traces
-            # (we know trace 0 is the scatter; everything afterward is cylinders)
-            while len(fig.data) > 1:
-                fig.data = fig.data[:-1]
-
-            # add the cylinders for *this* tree
-            for cyl in cyl_list:
-                verts = np.asarray(cyl.vertices)
-                tris  = np.asarray(cyl.triangles)
-                fig.add_trace(go.Mesh3d(
-                    x=verts[:,0], y=verts[:,1], z=verts[:,2],
-                    i=tris[:,0], j=tris[:,1], k=tris[:,2],
-                    opacity=1.0,
-                    color=tree_col,
-                    showlegend=False
-                ))
-
-            # rotate camera
-            θ = np.deg2rad(ang)
-            new_eye = dict(
-                x = center[0] + r * np.cos(θ),
-                y = center[1] + r * np.sin(θ),
-                z = center[2] + z_offset
+        # 3) update layout
+        if simulator.gsplat.name.startswith("sv_"):
+            fig.update_layout(
+            scene_camera=dict(eye=eye,
+                    up=dict(x=0, y=0, z=1)),
+            scene=dict(
+                aspectmode="manual",
+                aspectratio=dict(x=dx, y=dy, z=dz),
+                xaxis=dict(title='',
+                        range=[xmin, xmax], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                yaxis=dict(title='',
+                        range=[ymax, ymin], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                zaxis=dict(title='',
+                        range=[zmax, zmin], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+            ),
+            margin=dict(l=0, r=0, t=0, b=0),
+            width=1000, height=1000,
+            showlegend=False
             )
-            fig.update_layout(scene_camera=dict(eye=new_eye))
+        else:
+            fig.update_layout(
+            scene_camera=dict(eye=eye,
+                    up=dict(x=0, y=0, z=1)),
+            scene=dict(
+                aspectmode="manual",
+                aspectratio=dict(x=dx, y=dy, z=dz),
+                xaxis=dict(title='',
+                        range=[xmin, xmax], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                yaxis=dict(title='',
+                        range=[ymax, ymin], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                zaxis=dict(title='',
+                        range=[zmax, zmin], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,)
+            ),
+            margin=dict(l=0, r=0, t=0, b=0),
+            width=1000, height=1000,
+            showlegend=False
+            )
 
-            # write out frame
-            path = f"{out_dir}/frame_{i:03d}.png"
-            fig.write_image(path, width=1000, height=1000)
-            png_paths.append(path)
+        if not config.get('gif'):
+            print("Rendering the figure...")
+            fig.show()
 
-        # --- 5) Build the GIF ---
-        images = [imageio.imread(p) for p in png_paths]
-        # gif_path = "/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space/.gif"
-        gif_path = f"/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space/{simulator.gsplat.name}.gif"
-        imageio.mimsave(gif_path, images, duration=0.1)
+        if config.get('gif'):
+            # --- 4) Render & save each frame ---
+            out_dir = "/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space"
+            os.makedirs(out_dir, exist_ok=True)
 
-        # --- 6) Clean up the individual frames ---
-        for f in glob.glob(os.path.join(out_dir, "frame_*.png")):
-            os.remove(f)
+            cam = fig.layout.scene.camera
+            off_x = cam.eye.x - center[0]
+            off_y = cam.eye.y - center[1]
+            off_z = cam.eye.z - center[2]
 
-        print(f"Saved spinning GIF to {gif_path}")
+            # 3) Compute your radius in that XY‐offset plane
+            r = np.sqrt(off_x**2 + off_y**2) * 1   # distance from center to camera in XY
+            # (keep the same vertical offset)
+            z_offset = off_z                  # camera’s height above center
 
-    trajset[target] = paths
+            n_frames = 60
+            angles   = np.linspace(0, 360, n_frames, endpoint=False)
+            png_paths = []
+            # for i, ang in enumerate(angles):
+            #     θ = np.deg2rad(ang)
+            #     # build the *absolute* eye = center + offset
+            #     new_eye = dict(
+            #         x = center[0] + r * np.cos(θ),
+            #         y = center[1] + r * np.sin(θ),
+            #         z = center[2] + z_offset
+            #     )
+            #     fig.update_layout(scene_camera=dict(eye=new_eye))
+            #     path = f"{out_dir}/frame_{i:03d}.png"
+            #     fig.write_image(path, width=1000, height=1000)
+            #     png_paths.append(path)
+            num_trees = len(all_cylinder_lists)
+            color_list = ["purple", "orange", "cyan"]  # len == num_trees
+            # define at which frames you switch
+            # e.g. switch twice means three segments:
+            switch_points = [0,
+                            n_frames//3,
+                            2*n_frames//3,
+                            n_frames]  # segments: [0..20),[20..40),[40..60)
+            for i, ang in enumerate(np.linspace(0,360,n_frames,endpoint=False)):
+                # decide which segment we’re in
+                seg = next(j for j in range(len(switch_points)-1)
+                        if switch_points[j] <= i < switch_points[j+1])
+                cyl_list = all_cylinder_lists[seg]  # select the tree for this segment
+                tree_col  = color_list[seg]
+
+                # clear any old cylinder traces
+                # (we know trace 0 is the scatter; everything afterward is cylinders)
+                while len(fig.data) > 1:
+                    fig.data = fig.data[:-1]
+
+                # add the cylinders for *this* tree
+                for cyl in cyl_list:
+                    verts = np.asarray(cyl.vertices)
+                    tris  = np.asarray(cyl.triangles)
+                    fig.add_trace(go.Mesh3d(
+                        x=verts[:,0], y=verts[:,1], z=verts[:,2],
+                        i=tris[:,0], j=tris[:,1], k=tris[:,2],
+                        opacity=1.0,
+                        color=tree_col,
+                        showlegend=False
+                    ))
+
+                # rotate camera
+                θ = np.deg2rad(ang)
+                new_eye = dict(
+                    x = center[0] + r * np.cos(θ),
+                    y = center[1] + r * np.sin(θ),
+                    z = center[2] + z_offset
+                )
+                fig.update_layout(scene_camera=dict(eye=new_eye))
+
+                # write out frame
+                path = f"{out_dir}/frame_{i:03d}.png"
+                fig.write_image(path, width=1000, height=1000)
+                png_paths.append(path)
+
+            # --- 5) Build the GIF ---
+            images = [imageio.imread(p) for p in png_paths]
+            # gif_path = "/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space/.gif"
+            gif_path = f"/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space/{simulator.gsplat.name}.gif"
+            imageio.mimsave(gif_path, images, duration=0.1)
+
+            # --- 6) Clean up the individual frames ---
+            for f in glob.glob(os.path.join(out_dir, "frame_*.png")):
+                os.remove(f)
+
+            print(f"Saved spinning GIF to {gif_path}")
         
     return trajset
 
