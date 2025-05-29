@@ -162,24 +162,24 @@ class GSplat():
                 {"rgb": image_rgb, "semantic": image_sem}, both uint8 np.ndarrays
         """
         
-        if self.name.startswith("sv_") and "sfm_to_mocap_T" in self.transforms_nerf:
-            dp_scale     = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale
-            dp_transform = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform
-            sfm2mocap_T  = np.asarray(self.transforms_nerf["sfm_to_mocap_T"][0]["sfm_to_mocap_T"])
-            T_w2g        = self.T_w2g
+        # if self.name.startswith("tf_") and "sfm_to_mocap_T" in self.transforms_nerf:
+        #     dp_scale     = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale
+        #     dp_transform = self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform
+        #     sfm2mocap_T  = np.asarray(self.transforms_nerf["sfm_to_mocap_T"][0]["sfm_to_mocap_T"])
+        #     T_w2g        = self.T_w2g
 
-            S    = np.eye(4);      S[:3,:3] *= 1.0 / dp_scale
-            T_dp = np.eye(4);      T_dp[:3,:] = dp_transform
-            inv_dp = np.linalg.inv(T_dp)
-            M    = sfm2mocap_T @ inv_dp
-            A    = T_w2g @ M @ S
-            A_inv = np.linalg.inv(A)
-            T_c2g = A_inv @ T_c2w
-            P_c2g = torch.from_numpy(T_c2g[:3, :]).float()
-        else:
-            T_c2g = self.dataparser_scale * (self.T_w2g @ T_c2w)
-            P_c2g = torch.tensor(T_c2g[:3, :]).float()
-            P_c2g[:3, :3] *= 1.0 / self.dataparser_scale
+        #     S    = np.eye(4);      S[:3,:3] *= 1.0 / dp_scale
+        #     T_dp = np.eye(4);      T_dp[:3,:] = dp_transform
+        #     inv_dp = np.linalg.inv(T_dp)
+        #     M    = sfm2mocap_T @ inv_dp
+        #     A    = T_w2g @ M @ S
+        #     A_inv = np.linalg.inv(A)
+        #     T_c2g = A_inv @ T_c2w
+        #     P_c2g = torch.from_numpy(T_c2g[:3, :]).float()
+        # else:
+        T_c2g = self.dataparser_scale * (self.T_w2g @ T_c2w)
+        P_c2g = torch.tensor(T_c2g[:3, :]).float()
+        P_c2g[:3, :3] *= 1.0 / self.dataparser_scale
 
         camera.camera_to_worlds = P_c2g[None, :, :]
         cameras = camera.to(self.device)
@@ -210,13 +210,18 @@ class GSplat():
                         obb_box=None
                     )
 
+        outputs = self.pipeline.model.get_outputs_for_camera(
+            cameras,
+            obb_box=None
+        )
+        
         image_rgb = outputs["rgb"].cpu().numpy()
         image_rgb = (255 * image_rgb).astype(np.uint8)
 
         if query is None:
             return image_rgb
-
-        sem = outputs.get(self.perception_mode, outputs.get("sem", outputs["rgb"]))
+    
+        sem = outputs.get(self.perception_mode, outputs.get("similarity", outputs["rgb"]))
         sem = self.render_rescale(sem)
         sem = apply_colormap(sem, ColormapOptions("turbo"))
         image_sem = (255 * sem.cpu().numpy()).astype(np.uint8)

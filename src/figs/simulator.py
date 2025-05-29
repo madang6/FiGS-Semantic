@@ -193,6 +193,7 @@ class Simulator:
     def simulate(self,policy:Type[BaseController],
                  t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]|None=None,
                  query:str|None=None,
+                 clipseg:bool=False,
                  ) -> Tuple[np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """
         Simulates the flight.
@@ -262,12 +263,27 @@ class Simulator:
                 # Get current image
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
-                
-                if perception == "semantic_depth" and query is not None:
-                    img_dict = self.gsplat.render_rgb(camera,T_c2w,query)
-                    icr = img_dict["semantic"]
+
+                if clipseg is not None and perception == "semantic_depth" and query is not None:
+                    print("Using ClipSeg for semantic rendering.")
+                    img_cr = self.gsplat.render_rgb(camera,T_c2w)
+                    # img_cr = icr["semantic"]
+                    # img_cr_rgb = icr["rgb"]
+                    # img_cr_depth = icr["depth"]
+
+                    icr = clipseg.clipseg_hf_inference(image=img_cr, prompt=query)
+                elif perception == "semantic_depth" and query is not None:
+                    image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
+                    img_cr = icr["semantic"]
+                    img_cr_rgb = icr["rgb"]
                 else:
                     icr = self.gsplat.render_rgb(camera,T_c2w)
+                
+                # if perception == "semantic_depth" and query is not None:
+                #     img_dict = self.gsplat.render_rgb(camera,T_c2w,query)
+                #     icr = img_dict["semantic"]
+                # else:
+                #     icr = self.gsplat.render_rgb(camera,T_c2w)
 
                 # Add sensor noise and syncronize estimated state
                 if use_fusion:
