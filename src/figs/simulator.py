@@ -237,7 +237,10 @@ class Simulator:
 
         # Rollout Variables
         Tro,Xro,Uro = np.zeros(Nctl+1),np.zeros((nx,Nctl+1)),np.zeros((nu,Nctl))
-        Iro = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
+        Imgs_rgb = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
+        Imgs_sem = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
+        Imgs_depth = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
+        # Iro = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
         Xro[:,0] = x0
 
         # Diagnostics Variables
@@ -265,17 +268,16 @@ class Simulator:
                 T_c2w = Tb2w@T_c2b
 
                 if clipseg is not None and perception == "semantic_depth" and query is not None:
-                    print("Using ClipSeg for semantic rendering.")
-                    img_cr = self.gsplat.render_rgb(camera,T_c2w)
+                    image_dict = self.gsplat.render_rgb(camera,T_c2w)
                     # img_cr = icr["semantic"]
-                    # img_cr_rgb = icr["rgb"]
-                    # img_cr_depth = icr["depth"]
+                    icr_rgb = image_dict["rgb"]
+                    icr_depth = image_dict["depth"]
 
-                    icr = clipseg.clipseg_hf_inference(image=img_cr, prompt=query)
+                    icr = clipseg.clipseg_hf_inference(image=icr_rgb, prompt=query)
                 elif perception == "semantic_depth" and query is not None:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
-                    img_cr = icr["semantic"]
-                    img_cr_rgb = icr["rgb"]
+                    icr = image_dict["semantic"]
+                    icr_rgb = image_dict["rgb"]
                 else:
                     icr = self.gsplat.render_rgb(camera,T_c2w)
                 
@@ -319,12 +321,22 @@ class Simulator:
             if i % n_sim2ctl == 0:
                 k = i//n_sim2ctl
 
-                Iro[k,:,:,:] = icr
+                if query is not None:
+                    Imgs_sem[k,:,:,:] = icr
+                    Imgs_rgb[k,:,:,:] = icr_rgb
+                    Imgs_depth[k,:,:,:] = icr_depth
+                else:
+                    Imgs_rgb[k,:,:,:] = icr
                 Tro[k] = tcr
                 Xro[:,k+1] = xcr
                 Uro[:,k] = ucm
                 Tsol[:,k] = tsol
                 Adv[:,k] = adv
+
+        if query is not None:
+            Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb}
+        else:
+            Iro = {"rgb":Imgs_rgb}
 
         # Log final time
         Tro[Nctl] = t0+Nsim/hz_sim

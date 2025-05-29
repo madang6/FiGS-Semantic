@@ -157,7 +157,7 @@ def process_RRT_objectives(obj_targets, epcds_arr, env_bounds, radii, altitudes,
             print("     * decreasing r1 to sample closer to centroid\n")
             continue
 
-        # Choose the candidate closest in x to original centroid
+        # Choose the candidate closest to the scene origin 
         new_pos = min(in_bounds, key=lambda p: np.linalg.norm(p))
         print(f"  → Selected new target: {new_pos}")
 
