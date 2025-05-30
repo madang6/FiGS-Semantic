@@ -6,7 +6,9 @@ import numpy as np
 import math
 
 from scipy.spatial.transform import Rotation
+from scipy.spatial import cKDTree
 from scipy.interpolate import CubicSpline
+from sklearn.cluster import DBSCAN
 from typing import Dict,Tuple,Union
 
 from figs.tsampling.rrt_datagen_v10 import *
@@ -165,6 +167,151 @@ def process_RRT_objectives(obj_targets, epcds_arr, env_bounds, radii, altitudes,
 
     print("\nFinished processing all objects.")
     return new_obj_targets, object_centroid
+
+def process_RRT_objectives_loiter(
+    obj_targets,
+    epcds_arr,
+    env_bounds,
+    radii,
+    altitudes,
+    sample_size=10,
+    hoverMode=False
+):
+    """
+    For each object:
+      - compute its centroid
+      - sample points on the circle of radius r1 around that centroid
+      - reject points that are too close to obstacles (within r2) or out of env_bounds
+      - return up to `sample_size` of those valid points
+    
+    Returns:
+      sampled_obj_targets: list of arrays, each of shape (<=sample_size, 3)
+      object_centroids:    list of 1×3 arrays
+    """
+    object_centroids = []
+    sampled_obj_targets = []
+
+    # build once
+    kdtree = cKDTree(epcds_arr.T)
+    minb, maxb = env_bounds["minbound"], env_bounds["maxbound"]
+
+    for i, obj in enumerate(obj_targets):
+        objctr = obj.flatten()
+        object_centroids.append(objctr)
+
+        r1, r2 = radii[i]
+        z_val = altitudes[i]
+
+        # 1) generate circle
+        theta = np.linspace(0, 2*np.pi, 100, endpoint=False)
+        circle_pts = np.vstack([
+            objctr[0] + r1*np.cos(theta),
+            objctr[1] + r1*np.sin(theta),
+            np.full_like(theta, z_val)
+        ]).T
+
+        # 2) obstacle check
+        free = []
+        for p in circle_pts:
+            if not kdtree.query_ball_point(p, r2, eps=0.05, workers=-1):
+                free.append(p)
+        free = np.array(free)
+        print(f"Object {i}: {len(free)} free circle points")
+
+        # 3) bounds check
+        in_bounds = free[
+            (free[:,0] >= minb[0]) & (free[:,0] <= maxb[0]) &
+            (free[:,1] >= minb[1]) & (free[:,1] <= maxb[1]) &
+            (free[:,2] >= minb[2]) & (free[:,2] <= maxb[2])
+        ]
+        print(f"Object {i}: {len(in_bounds)} points inside env bounds")
+
+        # 4) sample up to sample_size
+        if len(in_bounds) == 0:
+            sampled = np.empty((0,3))
+        elif len(in_bounds) <= sample_size:
+            sampled = in_bounds
+        else:
+            idx = np.random.choice(len(in_bounds), size=sample_size, replace=False)
+            sampled = in_bounds[idx]
+
+        print(f"Object {i}: returning {sampled.shape[0]} samples\n")
+        sampled_obj_targets.append(sampled)
+
+    return sampled_obj_targets, object_centroids
+
+def process_obstacle_clusters_and_sample(
+    epcds_arr,          # 3×M array of obstacle points
+    env_bounds,         # {"minbound": (x,y,z), "maxbound": (x,y,z)}
+    z_range=(-2.5, -0.9), # only cluster points with z in [0.9, 2.0]
+    cluster_eps=0.5,    # DBSCAN ε (meters) for clustering obstacles
+    min_samples=10,     # DBSCAN min pts per cluster
+    clearance=0.2,      # extra clearance (m) beyond cluster extent
+    sample_size=10      # how many points on the circle
+):
+    """
+    1) Filter obstacle points inside env_bounds
+    2) Cluster them with DBSCAN → labels
+    3) For each cluster:
+        - compute centroid and its max‐radius
+        - set R = max_radius + clearance
+        - sample `sample_size` points equally around centroid at R
+        - reject any that collide or leave env_bounds
+    Returns:
+      cluster_centroids: list of (3,) arrays
+      sampled_rings:     list of (≤sample_size, 3) arrays
+    """
+    pts = epcds_arr.T
+    minb, maxb = np.array(env_bounds["minbound"]), np.array(env_bounds["maxbound"])
+    min_h, max_h = z_range
+
+    # 1) only keep obstacles inside the bounds
+    mask = np.all((pts >= minb) & (pts <= maxb), axis=1)
+    in_pts = pts[mask]
+    if len(in_pts) == 0:
+        return [], []
+
+    # 2) cluster
+    clustering = DBSCAN(eps=cluster_eps, min_samples=min_samples).fit(in_pts)
+    labels = clustering.labels_
+    clusters = {lab: in_pts[labels==lab] for lab in set(labels) if lab >= 0}
+
+    kdtree = cKDTree(pts)  # full scene for collision checks
+    centroids, rings = [], []
+
+    for lab, pts_c in clusters.items():
+        # 3a) centroid & cluster‐radius
+        ctr = pts_c.mean(axis=0)
+
+        # height‐filter
+        if not (min_h <= ctr[2] <= max_h):
+            continue
+
+        radii = np.linalg.norm(pts_c - ctr, axis=1)
+        R_cluster = radii.max()
+        R = R_cluster + clearance
+
+        centroids.append(ctr)
+
+        # 3b) generate equal‐angle candidates
+        thetas = np.linspace(0, 2*np.pi, sample_size, endpoint=False)
+        circle = np.vstack([
+            ctr[0] + R*np.cos(thetas),
+            ctr[1] + R*np.sin(thetas),
+            np.full_like(thetas, ctr[2])
+        ]).T
+
+        # 3c) reject any too-close to obstacle (within clearance) or OOB
+        good = []
+        for p in circle:
+            if kdtree.query_ball_point(p, clearance, eps=0.01):
+                continue
+            if not np.all((minb <= p) & (p <= maxb)):
+                continue
+            good.append(p)
+        rings.append(np.array(good))
+
+    return rings, centroids
 
 def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
     def extract_yaw_from_quaternion(quaternions):

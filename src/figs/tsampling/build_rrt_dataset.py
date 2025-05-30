@@ -179,7 +179,8 @@ def generate_rrt_paths(
         simulator, 
         pcd, pcd_arr, 
         objectives:List[str], obj_targets, 
-        semantic_centroid, env_bounds, 
+        semantic_centroid, env_bounds,
+        rings, obstacles, 
         Niter_RRT, viz=True
         ):
     def get_config_option(option_name, prompt, valid_options=None, default=None):
@@ -301,7 +302,7 @@ def generate_rrt_paths(
 
     trajset = {}
     all_cylinder_lists = []
-    for i, (target, pose, centroid) in enumerate(zip(objectives, obj_targets, semantic_centroid)):
+    for i, (target, pose, centroid, ring_pts, obstacle) in enumerate(zip(objectives, obj_targets, semantic_centroid, rings, obstacles)):
         r1 = config.get('radii')[i][0]
         r2 = config.get('radii')[i][1]
 
@@ -460,6 +461,36 @@ def generate_rrt_paths(
                 name=f'Goal Exclusion Radius={r2}',
                 showlegend=False
             ))
+
+            for obstacle, ring_pts in zip(obstacles, rings):
+                # flatten in case it's a column‐vector
+                ctr = obstacle.flatten()
+
+                # skip empty or bad entries
+                if not isinstance(ring_pts, (list, np.ndarray)) or len(ring_pts) == 0:
+                    print(f"  → no ring points for centroid {ctr[:2]}; skipping")
+                    continue
+
+                # take the very first sample
+                first_pt = np.array(ring_pts)[0]
+
+                # compute X–Y distance between that sample and the centroid
+                radius = np.linalg.norm(first_pt[:2] - ctr[:2])
+                theta  = np.linspace(0, 2*np.pi, 200)
+
+                # build a perfect circle around the centroid
+                x_ring = ctr[0] + radius * np.cos(theta)
+                y_ring = ctr[1] + radius * np.sin(theta)
+                z_ring = np.full_like(theta, ctr[2])   # use centroid's Z
+
+                # add to your Plotly figure
+                fig.add_trace(go.Scatter3d(
+                    x=x_ring, y=y_ring, z=z_ring,
+                    mode='lines',
+                    line=dict(color='green', width=4),
+                    name=f'Ring Radius={radius:.2f}',
+                    showlegend=False
+                ))
             
         # # once you have your point cloud `pts` (N×3 array):
         min_pt, max_pt = pts.min(axis=0), pts.max(axis=0)
