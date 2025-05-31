@@ -358,6 +358,7 @@ def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
     axes[0, 0].set_ylabel('Y')
     axes[0, 0].axis('equal')
     axes[0, 0].legend()
+    axes[0, 0].invert_yaxis()
 
     axes[0, 1].plot(x_smooth, y_smooth, '--o', label='Smoothed Trajectory')
     axes[0, 1].quiver(x_smooth, y_smooth, vx_smooth, vy_smooth, angles='xy', scale_units='xy', scale=1.5, color='b', alpha=0.5, label='Heading')
@@ -369,6 +370,7 @@ def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
     axes[0, 1].set_ylabel('Y')
     axes[0, 1].axis('equal')
     axes[0, 1].legend()
+    axes[0, 1].invert_yaxis()
 
 
     # Plot velocity components
@@ -435,7 +437,7 @@ def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
     plt.tight_layout()
     plt.show()
 
-def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, threshold_distance, viz=False, randint=None):
+def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, threshold_distance, viz=False, randint=None, loiter=False):
     """
     Processes a single branch of positions to compute trajectory and smooth trajectory data.
 
@@ -737,20 +739,17 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
     target_quaternion = traj_orient(smooth_trajectory[:,1:4],np.array(smoothed_quaternions),obj_loc)
     
     # Calculate distance to final position
-    # distance_to_final = np.linalg.norm(smooth_trajectory[:, 1:4] - smooth_trajectory[-1, 1:4], axis=1)
     # Calculate progress based on distance
     progress = np.linspace(0, 1, len(smooth_trajectory))  # Linear progress from 0 to 1
     # progress = (np.exp(0.5 * progress) - 1 ) / (np.exp(0.5) - 1)
     progress = np.log1p(progress * (np.e - 1)) / np.log(np.e)  # Logarithmic scaling
-    # progress = np.ones(len(trajectory))
+    if loiter == True:
+        progress = np.ones(len(trajectory))
     smooth_adjusted_quaternions = weight_quaternions(np.array(smoothed_quaternions), target_quaternion, progress)
     smooth_trajectory[:,7:11] = smooth_adjusted_quaternions
 
     smooth_angular_rates = compute_angular_rates(smooth_trajectory, times)
-    # smooth_angular_rates = exp_mabr(smooth_angular_rates)
 
-    # smooth_trajectory[:,1:4] = trajectory[:,1:4]
-    # smooth_trajectory[:,4:7] = trajectory[:,4:7]
     smooth_trajectory[:,11:14] = smooth_angular_rates
 
     # Get smoothed orientations that correspond to times in common_times
@@ -804,7 +803,7 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
         smooth_trajectory = smooth_trajectory.T
         return smooth_trajectory, common_time_position_orientation_pairs, None
     
-def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling_frequency, randint=None):
+def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling_frequency, randint=None, loiter=False):
     #NOTE True to plot a single trajectory, False for normal (generate data) use
     if randint is not None:
         viz = True
@@ -827,7 +826,8 @@ def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling
             pad_t=2,
             viz=viz,
             threshold_distance=1.5,
-            randint=randint
+            randint=randint,
+            loiter=loiter
             )
         if result[0] is None and result[1] is None and result[2] is None:
             print(f"Breaking out of the loop. Branch {idbr} returned None.")
@@ -845,46 +845,6 @@ def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling
     else:
         return new_branches, nodes_RRT
     
-# def traj_orient(
-#     trajectory: np.ndarray, 
-#     quaternions: np.ndarray, 
-#     goal_xyz: np.ndarray
-#     ):
-#     """
-#     Update the orientation to point towards the center of the circle surrounding the object.
-
-#     Args:
-#         trajectory: Array of shape (N, 3), where each row is an (x, y, z) coordinate.
-#         quaternions: Array of shape (N, 4), where each row is a quaternion [qx, qy, qz, qw].
-#         goal_xyz: 1D array of shape (3,) representing the target (goal) location [x, y, z].
-#         radius: Radius of the circle surrounding the goal.
-
-#     Returns:
-#         Adjusted trajectory and updated quaternions as new arrays.
-#     """
-#     # Ensure trajectory and goal dimensions are correct
-#     assert trajectory.shape[1] == 3, "Trajectory must have 3 coordinates per point."
-#     assert len(goal_xyz) == 3, "Goal must be a 3D coordinate."
-#     assert quaternions.shape[1] == 4, "Quaternions must have 4 components per point."
-
-#     # # Adjust the final position
-#     # adjusted_trajectory = goal_to_radius(trajectory, goal_xyz, radius)
-
-#     # Compute the direction vector from the adjusted final position to the goal
-#     direction = goal_xyz - trajectory[-1]
-#     direction_norm = np.linalg.norm(direction)
-#     direction_unit = direction / direction_norm
-
-#     # Update the quaternion for the final point to point towards the goal
-#     # Compute the new yaw angle from the direction vector
-#     yaw = np.arctan2(direction_unit[1], direction_unit[0])  # Direction in the xy-plane
-#     new_quaternion = Rotation.from_euler('z', yaw).as_quat()
-
-#     # Update the quaternions
-#     # updated_quaternions = np.copy(quaternions)
-#     # updated_quaternions[-1] = new_quaternion
-
-#     return new_quaternion
 def traj_orient(
     trajectory: np.ndarray, 
     quaternions: np.ndarray, 
