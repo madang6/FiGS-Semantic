@@ -279,8 +279,8 @@ class Simulator:
                     icr = image_dict["semantic"]
                     icr_rgb = image_dict["rgb"]
                 else:
-                    icr = self.gsplat.render_rgb(camera,T_c2w)
-                
+                    image_dict = self.gsplat.render_rgb(camera,T_c2w)
+                    icr = image_dict["rgb"]
                 # if perception == "semantic_depth" and query is not None:
                 #     img_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                 #     icr = img_dict["semantic"]

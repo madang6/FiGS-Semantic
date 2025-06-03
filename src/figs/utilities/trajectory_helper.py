@@ -361,8 +361,10 @@ def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
     axes[0, 0].invert_yaxis()
 
     axes[0, 1].plot(x_smooth, y_smooth, '--o', label='Smoothed Trajectory')
-    axes[0, 1].quiver(x_smooth, y_smooth, vx_smooth, vy_smooth, angles='xy', scale_units='xy', scale=1.5, color='b', alpha=0.5, label='Heading')
-    axes[0, 1].quiver(x_smooth, y_smooth, orientation_x_smooth, orientation_y_smooth, angles="xy", scale_units="xy", scale=1, color="r", alpha=0.7, label="Orientation")
+    axes[0, 1].quiver(x_smooth, y_smooth, vx_smooth, vy_smooth, # BLUE
+                       angles='xy', scale_units='xy', scale=1.5, color='b', alpha=0.5, label='Heading')
+    axes[0, 1].quiver(x_smooth, y_smooth, orientation_x_smooth, orientation_y_smooth, # RED
+                       angles="xy", scale_units="xy", scale=1, color="r", alpha=0.7, label="Orientation")
     axes[0, 1].plot(x_init, y_init, '-x', label='RRT* Trajectory',color='lime')
     axes[0, 1].plot(obj_loc[0], obj_loc[1], 'o', label='Object Location', color='yellow')
     axes[0, 1].set_title('Smoothed Trajectory in XY Plane')
@@ -390,12 +392,14 @@ def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
 
     # Plot yaw angles
     axes[2, 0].plot(time_points, np.degrees(yaw_orig), label='Yaw (degrees)')
+    axes[2, 0].plot(time_points, np.degrees(yaw_alt_orig), label='Yaw Alt (degrees)', linestyle='--')
     axes[2, 0].set_title('Original Yaw Angle vs Time')
     axes[2, 0].set_xlabel('Time (s)')
     axes[2, 0].set_ylabel('Yaw Angle (degrees)')
     axes[2, 0].legend()
 
     axes[2, 1].plot(time_points, np.degrees(yaw_smooth), label='Yaw (degrees)')
+    axes[2, 1].plot(time_points, np.degrees(yaw_alt_smooth), label='Yaw Alt (degrees)', linestyle='--')
     axes[2, 1].set_title('Smoothed Yaw Angle vs Time')
     axes[2, 1].set_xlabel('Time (s)')
     axes[2, 1].set_ylabel('Yaw Angle (degrees)')
@@ -548,7 +552,45 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
 
         return smoothed_rates
     
-    def compute_quaternions(trajectory):
+    def compute_quaternions(trajectory: np.ndarray) -> list[np.ndarray]:
+        """
+        For each timestep i, look at (vx, vy) = (trajectory[i,4], trajectory[i,5]).
+        If speed > 1e-6, compute yaw = atan2(vy, vx), then build a ZYX‐Euler quaternion
+        q = from_euler('ZYX', [yaw, 0, 0]).
+        If speed ≈ 0, simply reuse the previous quaternion.
+        Use obedient_quaternion(…) to keep quaternion‐sign continuous.
+        Returns a Python list of length N, each entry = np.array([qx, qy, qz, qw]).
+        """
+        quaternions: list[np.ndarray] = []
+        eps = 1e-6
+
+        for i in range(len(trajectory)):
+            vx = trajectory[i, 4]
+            vy = trajectory[i, 5]
+            speed_xy = np.hypot(vx, vy)
+
+            if speed_xy > eps:
+                raw_yaw = np.arctan2(vy, vx)  # in (−π, +π]
+                # Build a pure‐yaw quaternion using ZYX convention:
+                #   R = Rz(raw_yaw) * Ry(0) * Rx(0) = Rz(raw_yaw).
+                quat = Rotation.from_euler("ZYX", [raw_yaw, 0.0, 0.0], degrees=False).as_quat()
+            else:
+                # if speed is near zero, freeze at the previous quaternion
+                if i == 0:
+                    # First frame, no “previous” quaternion exists → use identity
+                    quat = np.array([0.0, 0.0, 0.0, 1.0])
+                else:
+                    quat = quaternions[-1].copy()
+
+            # Enforce continuity in sign (q and −q represent the same rotation)
+            if i > 0:
+                quat = obedient_quaternion(quat, quaternions[-1])
+
+            quaternions.append(quat)
+
+        return quaternions
+    
+    def compute_quaternions_old(trajectory):
         quaternions = []
         for i in range(len(trajectory)):
             if np.sqrt(trajectory[i,4]**2 + trajectory[i,5]**2) > 1e-6:
@@ -732,9 +774,10 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
     smooth_trajectory[:, 4:7] = np.column_stack((smooth_vx, smooth_vy, smooth_vz))
 
     smoothed_quaternions = compute_quaternions(smooth_trajectory)
-    target_quaternion = traj_orient(smooth_trajectory[:,1:4],np.array(smoothed_quaternions),obj_loc)
-
+    smooth_trajectory[:, 7:11] = np.array(smoothed_quaternions)
+###################################################################################################################
     smooth_trajectory[:, 7:11] = adjusted_quaternions
+
     #NOTE gives a target quaternion to track based on object location
     target_quaternion = traj_orient(smooth_trajectory[:,1:4],np.array(smoothed_quaternions),obj_loc)
     
@@ -743,11 +786,16 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
     progress = np.linspace(0, 1, len(smooth_trajectory))  # Linear progress from 0 to 1
     # progress = (np.exp(0.5 * progress) - 1 ) / (np.exp(0.5) - 1)
     progress = np.log1p(progress * (np.e - 1)) / np.log(np.e)  # Logarithmic scaling
-    if loiter == True:
-        progress = np.ones(len(trajectory))
+    # if loiter == True:
+    #     print(f"Loitering enabled for branch {branch_id}.")
+    #     progress = np.ones(len(trajectory))
     smooth_adjusted_quaternions = weight_quaternions(np.array(smoothed_quaternions), target_quaternion, progress)
     smooth_trajectory[:,7:11] = smooth_adjusted_quaternions
 
+    if loiter == True:
+        print(f"Loitering enabled for branch {branch_id}.")
+        smooth_trajectory[:, 7:11] = target_quaternion
+###################################################################################################################
     smooth_angular_rates = compute_angular_rates(smooth_trajectory, times)
 
     smooth_trajectory[:,11:14] = smooth_angular_rates
@@ -757,7 +805,7 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
     for t in common_times:
         idx = np.where(times == t)[0]
         if len(idx) > 0:
-            common_orientations.append(smooth_trajectory[idx[0], 4:7])
+            common_orientations.append(smooth_trajectory[idx[0], 7:11])
 
     # Pad trajectory
     pad_ts = np.linspace(times[-1], times[-1] + pad_t, int(pad_t / dt))
@@ -785,7 +833,8 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
         (time, pos, orient) for (time, pos), orient in zip(common_time_position_pairs, common_orientations)
     ]
 
-    if viz and branch_id == randint:
+    if viz and (branch_id == randint or loiter == True):
+        print(f"Visualizing branch {branch_id}.")
         if len(times) != len(trajectory):
             print(f"Length mismatch: times ({len(times)}) != trajectory ({len(trajectory)})")
             raise ValueError("The length of times and trajectory must be the same.")
@@ -832,7 +881,7 @@ def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling
         if result[0] is None and result[1] is None and result[2] is None:
             print(f"Breaking out of the loop. Branch {idbr} returned None.")
             continue  # Continue the loop
-        elif viz and randint == idbr:
+        elif viz and (randint == idbr or loiter == True):
             new_branches.append(result[0])
             nodes_RRT.append(result[1])
             debug_dict = result[2]
@@ -844,81 +893,72 @@ def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling
         return new_branches, nodes_RRT, debug_dict
     else:
         return new_branches, nodes_RRT
-    
+
 def traj_orient(
-    trajectory: np.ndarray, 
-    quaternions: np.ndarray, 
-    goal_xyz: np.ndarray
+    trajectory: np.ndarray,   # shape = (N,3), camera positions [x,y,z]
+    quaternions:  np.ndarray, # shape = (N,4), unused here but kept in signature
+    goal_xyz:     np.ndarray   # shape = (3,), [x_goal, y_goal, z_goal]
 ) -> np.ndarray:
     """
-    Returns a full (N,4) array of quaternions, one for each point in 'trajectory',
-    so that local +X points from that waypoint toward 'goal_xyz' and local +Z is 'up'.
+    Returns an (N,4) array of quaternions (qx,qy,qz,qw) so that:
+      - local +X (camera forward) points horizontally (in XY) toward goal_xyz
+      - local +Z is “down” in world, so that the same ZYX‐Euler convention matches your optimizer.
 
-    Args:
-        trajectory:  (N, 3) positions of the camera/tool at each time step.
-        quaternions: (N, 4) existing quaternions [qx, qy, qz, qw] (not strictly used here,
-                     but kept in the function signature for consistency).
-        goal_xyz:    (3,)   the target location [x, y, z].
+    We build each frame’s yaw = atan2(dy,dx), then produce
+      q = Rotation.from_euler("ZYX", [yaw, 0, 0]).as_quat()
+
+    Special handling:
+      • If camera_x,y == goal_x,y (i.e. dist_xy < eps), we keep the previous yaw (no jump).
+      • We “unwrap” yaw around ±π so there is no discontinuous 360° flip.
 
     Returns:
-        new_quaternions: (N, 4) array of quaternions [qx, qy, qz, qw].
-                         At each waypoint, +X faces the goal, +Z is up.
+      new_quaternions: np.ndarray of shape (N,4), dtype=float.
     """
     N = len(trajectory)
-    new_quaternions = np.empty((N, 4), dtype=float)
+    new_quats = np.zeros((N, 4), dtype=float)
+    eps = 1e-6
+
+    prev_yaw_unwrapped = None
 
     for i in range(N):
-        camera_pos = trajectory[i]
-        
-        # 1) Forward = direction from camera_pos to goal
-        forward = goal_xyz - camera_pos
-        norm_fwd = np.linalg.norm(forward)
-        if norm_fwd < 1e-9:
-            # If the camera is basically at the goal, pick an arbitrary forward
-            forward = np.array([1.0, 0.0, 0.0])
+        cam_x, cam_y, _ = trajectory[i]
+        dx = goal_xyz[0] - cam_x
+        dy = goal_xyz[1] - cam_y
+        dist_xy = np.hypot(dx, dy)
+
+        if dist_xy < eps:
+            # camera is (almost) directly above/below the goal in XY
+            if prev_yaw_unwrapped is None:
+                raw_yaw = 0.0
+            else:
+                raw_yaw = prev_yaw_unwrapped
         else:
-            forward /= norm_fwd
+            raw_yaw = np.arctan2(dy, dx)  # in (−π, +π]
 
-        # 2) "World up" vector
-        up = np.array([0.0, 0.0, 1.0], dtype=float)
+        # Unwrap around ±π so yaw moves smoothly
+        if prev_yaw_unwrapped is None:
+            unwrapped_yaw = raw_yaw
+        else:
+            delta = raw_yaw - prev_yaw_unwrapped
+            if delta > np.pi:
+                raw_yaw -= 2.0 * np.pi
+            elif delta < -np.pi:
+                raw_yaw += 2.0 * np.pi
+            unwrapped_yaw = raw_yaw
 
-        # 3) If forward is nearly parallel to up, pick a different up to avoid cross=0
-        dot_fu = np.dot(forward, up)
-        if abs(dot_fu) > 0.9999:
-            up = np.array([0.0, 1.0, 0.0], dtype=float)
+        prev_yaw_unwrapped = unwrapped_yaw
 
-        # 4) Make up orthonormal to forward
-        up = up - dot_fu * forward
-        up /= np.linalg.norm(up)
+        # Build pure‐yaw quaternion via the ZYX convention:
+        #   (yaw, pitch=0, roll=0) in “ZYX” → R = Rx(0) * Ry(0) * Rz(unwrapped_yaw)
+        q = Rotation.from_euler("ZYX", [unwrapped_yaw, 0.0, 0.0], degrees=False).as_quat()
 
-        # 5) right = up x forward  (assuming right-handed coordinates)
-        right = np.cross(up, forward)
-        right /= np.linalg.norm(right)
+        # continuity in sign for logging‐smoothness (not physically necessary)
+        if i > 0 and np.dot(q, new_quats[i-1]) < 0:
+            q = -q
 
-        # 6) Recompute up to ensure perfect orthogonality
-        up = np.cross(forward, right)
+        new_quats[i] = q
 
-        # 7) Build the rotation matrix columns as [X, Y, Z]
-        #    local +X = forward, local +Y = right, local +Z = up
-        rot_matrix = np.array([
-            [forward[0],  right[0],  up[0]],
-            [forward[1],  right[1],  up[1]],
-            [forward[2],  right[2],  up[2]]
-        ])
-
-        # 8) Convert to quaternion [qx, qy, qz, qw]
-        q = Rotation.from_matrix(rot_matrix).as_quat()
-
-        # 9) Optional continuity fix: keep sign consistent with previous frame
-        #    (prevents numeric sign flips, which are physically the same orientation
-        #    but can cause abrupt "jumps" in logs or Euler plots)
-        if i > 0:
-            if np.dot(q, new_quaternions[i - 1]) < 0:
-                q = -q
-
-        new_quaternions[i] = q
-
-    return new_quaternions
+    return new_quats
 
 def fo_to_xu(fo:np.ndarray,quad:Union[None,Dict[str,Union[float,np.ndarray]]])  -> np.ndarray:
     """

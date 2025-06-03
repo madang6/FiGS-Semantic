@@ -53,7 +53,7 @@ def plot_tXU_spatial(tXUs:Union[np.ndarray,List[np.ndarray]],
 
     plt.show(block=False)
 
-def plot_tXU_time(tXUs:Union[np.ndarray,List[np.ndarray]]) -> None:
+def plot_tXU_time(tXUs:Union[np.ndarray,List[np.ndarray]], plot_p=True, plot_q=True, aesthetics=False) -> None:
     """
     Plot the time trajectory.
 
@@ -70,46 +70,48 @@ def plot_tXU_time(tXUs:Union[np.ndarray,List[np.ndarray]]) -> None:
         tXUs = [tXUs]
 
     # Set the plot limits
-    tXU_lim = get_plot_limits(tXUs)
+    tXU_lim = get_plot_limits(tXUs,use_aesthetics=aesthetics)
 
-    # Plot Positions and Velocities
-    fig, axs = plt.subplots(3, 2, figsize=(10, 4))
+    if plot_p == True:
+        # Plot Positions and Velocities
+        fig, axs = plt.subplots(3, 2, figsize=(10, 4))
 
-    for i in range(6):
-        col,row = divmod(i,3)
-        for tXU in tXUs:
-            axs[row,col].plot(tXU[0,:],tXU[i+1,:],alpha=0.5)
+        for i in range(6):
+            col,row = divmod(i,3)
+            for tXU in tXUs:
+                axs[row,col].plot(tXU[0,:],tXU[i+1,:],alpha=0.5)
+            
+            axs[row,col].set_xlim([tXU_lim[0,0],tXU_lim[0,1]])
+            axs[row,col].set_ylim([tXU_lim[i+1,0],tXU_lim[i+1,1]])
+            axs[row,col].set_ylabel(ylabels_pv[col][row])
+
+        axs[0, 0].set_title('Position')
+        axs[0, 1].set_title('Velocity')
         
-        axs[row,col].set_xlim([tXU_lim[0,0],tXU_lim[0,1]])
-        axs[row,col].set_ylim([tXU_lim[i+1,0],tXU_lim[i+1,1]])
-        axs[row,col].set_ylabel(ylabels_pv[col][row])
+        plt.tight_layout()
+        plt.show(block=False)
 
-    axs[0, 0].set_title('Position')
-    axs[0, 1].set_title('Velocity')
-    
-    plt.tight_layout()
-    plt.show(block=False)
+    if plot_q == True:
+        # Plot Orientation and Body Rates
+        fig, axs = plt.subplots(4, 2, figsize=(10, 4))
 
-    # Plot Orientation and Body Rates
-    fig, axs = plt.subplots(4, 2, figsize=(10, 4))
+        for i in range(8):
+            col,row = divmod(i,4)
+            for tXU in tXUs:
+                axs[row,col].plot(tXU[0,:],tXU[i+7,:],alpha=0.5)
 
-    for i in range(8):
-        col,row = divmod(i,4)
-        for tXU in tXUs:
-            axs[row,col].plot(tXU[0,:],tXU[i+7,:],alpha=0.5)
+            axs[row,col].set_xlim([tXU_lim[0,0],tXU_lim[0,1]])
+            axs[row,col].set_ylim([tXU_lim[i+7,0],tXU_lim[i+7,1]])
+            axs[row,col].set_ylabel(ylabels_qw[col][row])
 
-        axs[row,col].set_xlim([tXU_lim[0,0],tXU_lim[0,1]])
-        axs[row,col].set_ylim([tXU_lim[i+7,0],tXU_lim[i+7,1]])
-        axs[row,col].set_ylabel(ylabels_qw[col][row])
+            if i == 4:
+                axs[row,col].invert_yaxis()
 
-        if i == 4:
-            axs[row,col].invert_yaxis()
-
-    axs[0, 0].set_title('Orientation')
-    axs[0, 1].set_title('Body Rates')
-    
-    plt.tight_layout()
-    plt.show(block=False)
+        axs[0, 0].set_title('Orientation')
+        axs[0, 1].set_title('Body Rates')
+        
+        plt.tight_layout()
+        plt.show(block=False)
 
 def plot_RO_spatial(ROs:Union[
                             Tuple[np.ndarray,np.ndarray,np.ndarray],
@@ -138,7 +140,10 @@ def plot_RO_spatial(ROs:Union[
     
 def plot_RO_time(ROs:Union[
                         Tuple[np.ndarray,np.ndarray,np.ndarray],
-                        List[Tuple[np.ndarray,np.ndarray,np.ndarray]]]) -> None:
+                        List[Tuple[np.ndarray,np.ndarray,np.ndarray]]],
+                plot_p:bool=True,
+                plot_q:bool=True,
+                aesthetics:bool=False) -> None:
     """
     Plot the time trajectory from a rollout.
 
@@ -157,7 +162,7 @@ def plot_RO_time(ROs:Union[
         tXUs.append(th.RO_to_tXU(RO))
 
     # Plot the time trajectory
-    plot_tXU_time(tXUs)
+    plot_tXU_time(tXUs,plot_p,plot_q,aesthetics)
 
 
 def get_plot_limits(tXUs:List[np.ndarray],use_aesthetics:bool=True,
