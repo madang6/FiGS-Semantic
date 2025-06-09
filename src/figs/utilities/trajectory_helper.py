@@ -13,7 +13,214 @@ from typing import Dict,Tuple,Union
 
 from figs.tsampling.rrt_datagen_v10 import *
 
-def filter_branches(paths, hover_mode=False):
+def filter_branches(paths, top_k=1, hover_mode=False):
+    """
+    Verbose version of filter_branches:
+      1) Hover‐mode pruning (radius=1.5) if requested.
+      2) Adjacency pruning (drop any point <0.25 from previous).
+      3) Discard branches with fewer than skip_nodes after each step.
+      4) Compute each branch’s furthest distance from its start and the (x,y) of that farthest point.
+      5) Sort by descending distance, then greedily pick top_k branches while maximizing
+         the minimum (x,y) separation among chosen branches.
+    
+    Extensive printouts at each step help you see exactly why branches get dropped/selected.
+    """
+    skip_nodes = 2
+    prefiltered = []
+
+    print("=== Stage 1: Initial pruning ===")
+    for branch_idx, positions in enumerate(paths):
+        positions = np.asarray(positions)
+        orig_len = positions.shape[0]
+        print(f"\nBranch {branch_idx}: original length = {orig_len}")
+
+        # (a) Hover‐mode in‐radius filter (if requested)
+        if hover_mode:
+            radius = 1.5
+            kept = [positions[0]]
+            for p in positions[1:]:
+                if np.linalg.norm(p - kept[0]) <= radius:
+                    kept.append(p)
+            positions = np.array(kept)
+            after_hover_len = positions.shape[0]
+            print(f"  After hover‐mode pruning (radius 1.5): length = {after_hover_len}")
+            if after_hover_len < skip_nodes:
+                print(f"    → Dropped: fewer than {skip_nodes} nodes after hover‐mode.")
+                continue
+        else:
+            print("  (Skipping hover‐mode pruning)")
+
+        # (b) Adjacency filter: drop any point closer than 0.25 to the previous kept point
+        pruned = [positions[0]]
+        for p in positions[1:]:
+            if np.linalg.norm(p - pruned[-1]) >= 0.25:
+                pruned.append(p)
+        pruned = np.array(pruned)
+        after_adj_len = pruned.shape[0]
+        print(f"  After adjacency pruning (≥ 0.25 apart): length = {after_adj_len}")
+        if after_adj_len < skip_nodes:
+            print(f"    → Dropped: fewer than {skip_nodes} nodes after adjacency pruning.")
+            continue
+
+        print(f"  → Keeping branch {branch_idx}, final pruned length = {after_adj_len}")
+        prefiltered.append(pruned)
+
+    print("\n=== Stage 2: Summary of prefiltered branches ===")
+    num_pref = len(prefiltered)
+    print(f"Number of branches that survived initial pruning: {num_pref}/{len(paths)}")
+    if num_pref == 0:
+        print("No branches remain. Returning []")
+        return []
+
+    # Compute each branch’s furthest distance and record the (x,y) of that farthest point
+    print("\n=== Stage 3: Computing furthest distances ===")
+    L = num_pref
+    furthest_dists = np.zeros(L)
+    furthest_pts   = np.zeros((L, 2))  # store only x,y of the farthest point
+
+    for i, branch in enumerate(prefiltered):
+        diffs = branch - branch[0]                # shape (Ni, dim)
+        norms = np.linalg.norm(diffs, axis=1)     # shape (Ni,)
+        idx_max = np.argmax(norms)                # index of the farthest‐away point
+        furthest_dists[i] = norms[idx_max]
+        furthest_pts[i]   = branch[idx_max][:2]   # only (x,y)
+
+        print(
+            f"  Prefiltered-index {i}: "
+            f"furthest_dist = {furthest_dists[i]:.4f}, "
+            f"farthest_pt(x,y) = ({furthest_pts[i,0]:.3f}, {furthest_pts[i,1]:.3f}), "
+            f"branch length = {branch.shape[0]}"
+        )
+
+    # Sort branch‐indices by descending furthest distance
+    sorted_idxs = np.argsort(furthest_dists)[::-1]
+    print("\n=== Stage 4: Sorting by furthest distance (desc) ===")
+    for rank, idx in enumerate(sorted_idxs):
+        print(f"  Rank {rank+1}: prefiltered[{idx}] with distance {furthest_dists[idx]:.4f}")
+
+    # Greedy selection of top_k, ensuring x,y spread
+    print("\n=== Stage 5: Greedy selection of top_k with spatial spread ===")
+    selected = []
+
+    if top_k <= 0:
+        print("top_k <= 0, returning empty list.")
+        return []
+
+    # 5a) Pick the branch with the absolute largest distance first
+    first_idx = sorted_idxs[0]
+    selected.append(first_idx)
+    print(f"  Step 1: Selected index {first_idx} (distance {furthest_dists[first_idx]:.4f})")
+
+    # 5b) Build list of remaining candidates
+    remaining = sorted_idxs.tolist()[1:]
+    print(f"  Remaining candidates after first pick: {remaining}")
+
+    # 5c) Iteratively pick the next-best candidate until we have top_k or run out
+    while len(selected) < top_k and remaining:
+        best_idx = None
+        best_min_dist = -1.0
+
+        print(f"\n  Looking for selection #{len(selected)+1} out of top_k={top_k}")
+        for r in remaining:
+            # Compute distances from candidate r’s farthest‐pt to every already‐selected farthest‐pt
+            dists_to_selected = np.linalg.norm(
+                furthest_pts[r] - furthest_pts[selected], axis=1
+            )
+            min_to_selected = np.min(dists_to_selected)
+
+            print(
+                f"    Candidate {r}: furthest_dist = {furthest_dists[r]:.4f}, "
+                f"min distance in (x,y) to already‐selected = {min_to_selected:.4f}"
+            )
+
+            if min_to_selected > best_min_dist:
+                best_min_dist = min_to_selected
+                best_idx = r
+
+        # Add best_idx to selected, remove from remaining
+        if best_idx is not None:
+            selected.append(best_idx)
+            remaining.remove(best_idx)
+            print(
+                f"  → Selected {best_idx} next (min distance {best_min_dist:.4f} to selected set)"
+            )
+            print(f"  Now selected = {selected}")
+            print(f"  Remaining = {remaining}")
+        else:
+            # No valid best found (shouldn’t really happen if remaining isn’t empty), break out
+            print("  No valid candidate found. Breaking.")
+            break
+
+    # Build final return list in the order they were selected
+    final_branches = [prefiltered[i] for i in selected]
+    print(f"\nFinal selected branches (indices into prefiltered): {selected}")
+    return final_branches
+
+def filter_branches_just_distance(paths, top_k=1, hover_mode=False):
+    """
+    Filters the branches of paths based on hover_mode and adjacency constraints,
+    then keeps the top_k branches whose furthest‐distance from their own start point
+    is largest.
+
+    Parameters:
+        paths (list of list of np.ndarray): The original paths for an object.
+        hover_mode (bool): Whether to apply hover mode filtering. Default False.
+        top_k (int): How many of the furthest-reaching branches to keep. Must be >= 1.
+
+    Returns:
+        list of np.ndarray: Up to top_k branches, sorted by decreasing furthest-distance.
+    """
+    skip_nodes = 2
+    prefiltered = []
+
+    for idbr, positions in enumerate(paths):
+        positions = np.array(positions)
+
+        # 1) Hover-mode “in-radius” pruning
+        if hover_mode:
+            radius = 1.5
+            filtered_positions = [positions[0]]
+            for pos in positions[1:]:
+                if np.linalg.norm(pos - filtered_positions[0]) <= radius:
+                    filtered_positions.append(pos)
+            positions = np.array(filtered_positions)
+
+            if positions.shape[0] < skip_nodes:
+                continue
+        else:
+            if positions.shape[0] < skip_nodes:
+                continue
+
+        # 2) Prune any two consecutive nodes closer than 0.25
+        pruned = [positions[0]]
+        for pos in positions[1:]:
+            if np.linalg.norm(pos - pruned[-1]) >= 0.25:
+                pruned.append(pos)
+
+        prefiltered.append(np.array(pruned))
+
+    # If no branches survived, return empty
+    if not prefiltered:
+        return []
+
+    # 3) Compute furthest-distance for each branch:
+    #    d_i = max_{p ∈ branch_i} ||p − branch_i[0]||
+    furthest_dists = np.array([
+        np.max(np.linalg.norm(branch - branch[0], axis=1))
+        for branch in prefiltered
+    ])
+
+    # 4) Sort branches by decreasing distance and take top_k
+    #    If fewer branches exist than top_k, we just return all
+    idx_sorted = np.argsort(furthest_dists)[::-1]  # indices in descending order
+    k = min(top_k, len(prefiltered))
+    selected_indices = idx_sorted[:k]
+
+    # 5) Return the corresponding branches in order of decreasing distance
+    final_branches = [prefiltered[i] for i in selected_indices]
+    return final_branches
+
+def filter_branches_old_old(paths, hover_mode=False):
     """
     Filters the branches of paths based on hover_mode and adjacency constraints.
 
@@ -864,6 +1071,7 @@ def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling
     new_branches = []
     nodes_RRT = []
     debug_dict = None
+    # Reverse the branches to process them as trajectories
     branches = [branch[::-1] for branch in branches]
     for idbr, positions in enumerate(branches):
         result = process_branch(

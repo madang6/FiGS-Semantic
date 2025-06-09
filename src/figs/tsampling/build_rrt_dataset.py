@@ -302,7 +302,7 @@ def generate_rrt_paths(
 
     trajset = {}
     all_cylinder_lists = []
-    for i, (target, pose, centroid, ring_pts, obstacle) in enumerate(zip(objectives, obj_targets, semantic_centroid, rings, obstacles)):
+    for i, (target, pose, centroid) in enumerate(zip(objectives, obj_targets, semantic_centroid)):
         r1 = config.get('radii')[i][0]
         r2 = config.get('radii')[i][1]
 
@@ -678,85 +678,478 @@ def generate_rrt_paths(
         
     return trajset
 
-def visualize_rrt_trajectories(simulator, scene, viz=False):
+# def visualize_rrt_trajectories(simulator, scene, viz=False):
 
-    def load_config_file(base_path, subfolder, filename):
-        config_path = os.path.join(base_path, subfolder)
-        for root, _, files in os.walk(config_path):
-            if filename in files:
-                with open(os.path.join(root, filename), 'r') as file:
-                    return yaml.safe_load(file), os.path.join(root, filename)
-        raise FileNotFoundError(f"{filename} not found in {config_path}")
+#     def load_config_file(base_path, subfolder, filename):
+#         config_path = os.path.join(base_path, subfolder)
+#         for root, _, files in os.walk(config_path):
+#             if filename in files:
+#                 with open(os.path.join(root, filename), 'r') as file:
+#                     return yaml.safe_load(file), os.path.join(root, filename)
+#         raise FileNotFoundError(f"{filename} not found in {config_path}")
 
-    # Load scene configuration
-    scene_config,cfg_path = load_config_file(simulator.configs_path, "course", f"{scene}.yml")
-    queries = scene_config.get("queries", [])
-    if not queries:
-        raise ValueError("No queries found in the scene.yml file.")
-    radii = [(scene_config.get("r1", 0.5), scene_config.get("r2", 0.5))]
-    Niter_RRT = scene_config.get("N", 1000)
+#     # Load scene configuration
+#     scene_config,cfg_path = load_config_file(simulator.configs_path, "course", f"{scene}.yml")
+#     queries = scene_config.get("queries", [])
+#     if not queries:
+#         raise ValueError("No queries found in the scene.yml file.")
+#     radii = [(scene_config.get("r1", 0.5), scene_config.get("r2", 0.5))]
+#     Niter_RRT = scene_config.get("N", 1000)
 
-    obj_targets, env_bounds, epcds, epcds_arr = get_objectives(simulator.gsplat, queries, viz)
+#     obj_targets, env_bounds, epcds, epcds_arr = get_objectives(simulator.gsplat, queries, viz)
     
-    # Obtain goal poses and object centroid
-    goal_poses, obj_centroid = th.process_RRT_objectives(obj_targets, epcds_arr, env_bounds, radii)
-    print(f"obj_centroid: {obj_centroid}")
+#     # Obtain goal poses and object centroid
+#     goal_poses, obj_centroid = th.process_RRT_objectives(obj_targets, epcds_arr, env_bounds, radii)
+#     print(f"obj_centroid: {obj_centroid}")
 
-    # Generate RRT* Paths
-    trajset = generate_rrt_paths(cfg_path, simulator,
-                                epcds, epcds_arr, 
-                                queries, goal_poses, 
-                                obj_centroid, env_bounds, 
-                                Niter_RRT)
+#     # Generate RRT* Paths
+#     trajset = generate_rrt_paths(cfg_path, simulator,
+#                                 epcds, epcds_arr, 
+#                                 queries, goal_poses, 
+#                                 obj_centroid, env_bounds, 
+#                                 Niter_RRT)
 
-    # new_trajset = {}
-    # for k, obj in enumerate(trajset):
+#     # new_trajset = {}
+#     # for k, obj in enumerate(trajset):
 
-    #     # Set the altitude of all trajectories for this particular object
-    #     goal = obj_targets[queries.index(obj)].flatten()
-    #     goal_z = goal[2]
-    #     goal_z = -1.1 if goal_z > 0 else np.clip(goal_z, -1.1, -1.0)
-    #     # print("goal: ", goal)
-    #     print(f"Position: {obj_centroid[k]}, Goal X: {goal[0]}, Goal Y: {goal[1]}, Goal Z: {goal_z}")
+#     #     # Set the altitude of all trajectories for this particular object
+#     #     goal = obj_targets[queries.index(obj)].flatten()
+#     #     goal_z = goal[2]
+#     #     goal_z = -1.1 if goal_z > 0 else np.clip(goal_z, -1.1, -1.0)
+#     #     # print("goal: ", goal)
+#     #     print(f"Position: {obj_centroid[k]}, Goal X: {goal[0]}, Goal Y: {goal[1]}, Goal Z: {goal_z}")
         
-    #     # Set the altitude of all trajectories for this particular object
-    #     updated_paths = th.set_RRT_altitude(trajset[obj], goal_z)
+#     #     # Set the altitude of all trajectories for this particular object
+#     #     updated_paths = th.set_RRT_altitude(trajset[obj], goal_z)
 
-    #     # Filter branches
-    #     filtered_branches = th.filter_branches(updated_paths)
+#     #     # Filter branches
+#     #     filtered_branches = th.filter_branches(updated_paths)
         
-    #     # Replace trajset[obj] with the new list of branches
-    #     new_trajset[obj] = filtered_branches
+#     #     # Replace trajset[obj] with the new list of branches
+#     #     new_trajset[obj] = filtered_branches
 
-        # for idbr, positions in enumerate(trajset[obj]):
+#         # for idbr, positions in enumerate(trajset[obj]):
 
 
-    # line_sets = []
-    # for idbr, positions in enumerate(branches):
-    #     # Ensure positions is an (M,3) float64 array
-    #     pts = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
-    #     if len(pts) < 2:
-    #         continue  # can’t draw a line with fewer than 2 points
+#     # line_sets = []
+#     # for idbr, positions in enumerate(branches):
+#     #     # Ensure positions is an (M,3) float64 array
+#     #     pts = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+#     #     if len(pts) < 2:
+#     #         continue  # can’t draw a line with fewer than 2 points
 
-    #     # Create edge list [(0,1), (1,2), …]
-    #     edges = [[i, i+1] for i in range(len(pts)-1)]
+#     #     # Create edge list [(0,1), (1,2), …]
+#     #     edges = [[i, i+1] for i in range(len(pts)-1)]
 
-    #     # Build the LineSet
-    #     ls = o3d.geometry.LineSet(
-    #         points=o3d.utility.Vector3dVector(pts),
-    #         lines=o3d.utility.Vector2iVector(edges)
-    #     )
+#     #     # Build the LineSet
+#     #     ls = o3d.geometry.LineSet(
+#     #         points=o3d.utility.Vector3dVector(pts),
+#     #         lines=o3d.utility.Vector2iVector(edges)
+#     #     )
 
-    #     # Optionally color each branch differently
-    #     # e.g. use a simple colormap or cycle through a fixed palette
-    #     color = np.random.rand(3)  # random RGB
-    #     ls.colors = o3d.utility.Vector3dVector([color for _ in edges])
+#     #     # Optionally color each branch differently
+#     #     # e.g. use a simple colormap or cycle through a fixed palette
+#     #     color = np.random.rand(3)  # random RGB
+#     #     ls.colors = o3d.utility.Vector3dVector([color for _ in edges])
 
-    #     line_sets.append(ls)
+#     #     line_sets.append(ls)
 
-    # # 3) Draw everything together
-    # o3d.visualization.draw_geometries(
-    #     [pcd, *line_sets],
-    #     window_name="Point Cloud + Tree Branches",
-    #     width=800, height=600
-    # )
+#     # # 3) Draw everything together
+#     # o3d.visualization.draw_geometries(
+#     #     [pcd, *line_sets],
+#     #     window_name="Point Cloud + Tree Branches",
+#     #     width=800, height=600
+#     # )
+        
+def visualize_rrt_trajectories(trajset,
+                               config_file,
+                               simulator, 
+                               pcd, pcd_arr,
+                               objectives:List[str], obj_targets,
+                               semantic_centroid, env_bounds,
+                               rings, obstacles
+                               ):
+    def get_config_option(option_name, prompt, valid_options=None, default=None):
+        if option_name in config:
+            value = config[option_name]
+            print(f"{option_name} set to {value} from config.yml")
+            if valid_options and value not in valid_options:
+                print(f"Invalid value for {option_name} in config.yml. Using default or prompting.")
+                value = None
+        else:
+            value = None
+
+        if value is None:
+            value = input(prompt).strip()
+            if valid_options:
+                while value not in valid_options:
+                    print(f"Invalid input. Valid options are: {', '.join(valid_options)}")
+                    value = input(prompt).strip()
+            if default and not value:
+                value = default
+        return value
+    def create_cylinder_between_points(p1, p2, radius=0.01, resolution=20):
+        direction = p2 - p1
+        length = np.linalg.norm(direction)
+        if length == 0: 
+            return None
+        direction /= length
+
+        # build unit‐height cylinder along Z
+        cyl = o3d.geometry.TriangleMesh.create_cylinder(radius, length, resolution, 4)
+        cyl.compute_vertex_normals()
+
+        # compute axis & angle between [0,0,1] and direction
+        z_axis = np.array([0,0,1.0])
+        axis = np.cross(z_axis, direction)
+        axis_len = np.linalg.norm(axis)
+        if axis_len < 1e-6:
+            # either parallel or anti‐parallel; if anti, rotate 180° around X
+            if np.dot(z_axis, direction) < 0:
+                R = o3d.geometry.get_rotation_matrix_from_axis_angle(np.pi * np.array([1,0,0]))
+            else:
+                R = np.eye(3)
+        else:
+            axis /= axis_len
+            angle = np.arccos(np.dot(z_axis, direction))
+            R = o3d.geometry.get_rotation_matrix_from_axis_angle(axis * angle)
+
+        cyl.rotate(R, center=(0,0,0))
+
+        # move to midpoint
+        midpoint = (p1 + p2) * 0.5
+        cyl.translate(midpoint)
+
+        return cyl
+
+    config = {}
+    # Check if the configuration file exists
+    if os.path.exists(config_file):
+        with open(config_file, 'r') as file:
+            config = yaml.safe_load(file) or {}
+        print("Configuration loaded from config.yml")
+    else:
+        print("Configuration file not found. Proceeding with interactive inputs.")
+    
+    all_cylinder_lists = []
+    for i, (target, pose, centroid, ring_pts, obstacle) in enumerate(zip(objectives, obj_targets, semantic_centroid, rings, obstacles)):
+        r1 = config.get('radii')[i][0]
+        r2 = config.get('radii')[i][1]
+        print(f"target: {target}")
+        print(f"trajset[target] size: {len(trajset[target])}")
+
+        cylinders = []
+        for path in trajset[target]:
+            pts3d = np.asarray(path, float).reshape(-1, 3)
+            if len(pts3d) < 2:
+                continue
+
+            for i in range(len(pts3d) - 1):
+                p0 = pts3d[i]
+                p1 = pts3d[i + 1]
+                cyl = create_cylinder_between_points(p0, p1, radius=0.01)
+                if cyl:
+                    cyl.paint_uniform_color([0, 0.5, 1.0])
+                    cylinders.append(cyl)
+
+            all_cylinder_lists.append(cylinders)
+        
+        print(f"Number of cylinder lists: {len(all_cylinder_lists)}")
+        pts  = np.asarray(pcd.points)
+        cols = np.clip(np.asarray(pcd.colors), 0, 1)
+        rgb  = (cols * 255).astype(int)
+        rgb_strs = [f"rgb({r},{g},{b})" for r,g,b in rgb]
+
+        # 2) Build the Figure with just the points
+        fig = go.Figure(layout=dict(width=1000, height=1000))
+        fig.add_trace(go.Scatter3d(
+            x=pts[:,0], y=pts[:,1], z=pts[:,2],
+            mode="markers",
+            marker=dict(size=2, color=rgb_strs),
+            showlegend=False
+        ))
+
+        # # Radius
+        # xc, yc = pose[0], pose[1]
+        # r1     = config.get("r1")
+        # # the Z‐height you want the circle drawn at—e.g. the same as your camera “ground” plane
+        # zc     = config.get('altitude',-1.1)    # or use 0 if you want it on the ground
+        # θ = np.linspace(0, 2*np.pi, 200)
+        # xs = xc + r1 * np.cos(θ)
+        # ys = yc + r1 * np.sin(θ)
+        # zs = np.full_like(θ, zc)
+        # fig.add_trace(go.Scatter3d(
+        #     x=xs, y=ys, z=zs,
+        #     mode="lines",
+        #     line=dict(
+        #         color="black",     # or whatever color you like
+        #         dash="dash",       # dashed style
+        #         width=4
+        #     ),
+        #     showlegend=False
+        # ))
+        
+        if not config.get('gif'):
+            # 3) Now add each cylinder mesh
+            for cyl in cylinders:
+                verts = np.asarray(cyl.vertices)
+                tris  = np.asarray(cyl.triangles)
+                # pick the uniform color you used in Open3D: [0, 0.5, 1.0] → rgb(0,128,255)
+                cyl_color = 'rgb(0,128,255)'
+                fig.add_trace(go.Mesh3d(
+                    x=verts[:,0], y=verts[:,1], z=verts[:,2],
+                    i=tris[:,0], j=tris[:,1], k=tris[:,2],
+                    opacity=1.0,
+                    color=cyl_color,
+                    showlegend=False
+                ))
+
+            # fetch radii from config (with defaults)
+            # r2 = float(config.get('r2', 0.5))
+            # r1 = float(config.get('r1', 0.0))   # or some default if you prefer
+            z_plane = pose[2]                   # or whatever height you want the circles at
+
+            # parameters for circle resolution
+            theta = np.linspace(0, 2*np.pi, 200)
+
+            #  centroid
+            x2 = pose[0] + r2 * np.cos(theta)
+            y2 = pose[1] + r2 * np.sin(theta)
+            z2 = np.full_like(theta, z_plane)
+
+            # start node
+            x1 = centroid[0] + r1 * np.cos(theta)
+            y1 = centroid[1] + r1 * np.sin(theta)
+            z1 = np.full_like(theta, z_plane)
+
+            fig.add_trace(go.Scatter3d(
+                x=x1, y=y1, z=z1,
+                mode='lines',
+                line=dict(color='orange', width=4),
+                name=f'Object Exclusion Radius={r1}',
+                showlegend=False
+            ))
+
+            fig.add_trace(go.Scatter3d(
+                x=x2, y=y2, z=z2,
+                mode='lines',
+                line=dict(color='red', width=4),
+                name=f'Goal Exclusion Radius={r2}',
+                showlegend=False
+            ))
+
+            for obstacle, ring_pts in zip(obstacles, rings):
+                # flatten in case it's a column‐vector
+                ctr = obstacle.flatten()
+
+                # skip empty or bad entries
+                if not isinstance(ring_pts, (list, np.ndarray)) or len(ring_pts) == 0:
+                    print(f"  → no ring points for centroid {ctr[:2]}; skipping")
+                    continue
+
+                # take the very first sample
+                first_pt = np.array(ring_pts)[0]
+
+                # compute X–Y distance between that sample and the centroid
+                radius = np.linalg.norm(first_pt[:2] - ctr[:2])
+                theta  = np.linspace(0, 2*np.pi, 200)
+
+                # build a perfect circle around the centroid
+                x_ring = ctr[0] + radius * np.cos(theta)
+                y_ring = ctr[1] + radius * np.sin(theta)
+                z_ring = np.full_like(theta, ctr[2])   # use centroid's Z
+
+                # add to your Plotly figure
+                fig.add_trace(go.Scatter3d(
+                    x=x_ring, y=y_ring, z=z_ring,
+                    mode='lines',
+                    line=dict(color='green', width=4),
+                    name=f'Ring Radius={radius:.2f}',
+                    showlegend=False
+                ))
+            
+        # # once you have your point cloud `pts` (N×3 array):
+        min_pt, max_pt = pts.min(axis=0), pts.max(axis=0)
+        center = (min_pt + max_pt) * 0.5
+
+        # 1) axis limits
+        # Get axis limits from config file if available
+        minbound = [float(x) if x not in [None, 'None'] else None for x in config.get('minbound', [None, None, None])]
+        maxbound = [float(x) if x not in [None, 'None'] else None for x in config.get('maxbound', [None, None, None])]
+        bounds = np.array([
+            [minbound[i] if minbound[i] is not None else pts[:, i].min(),
+                maxbound[i] if maxbound[i] is not None else pts[:, i].max()]
+            for i in range(3)
+        ])
+        xmin, xmax = bounds[0]
+        ymin, ymax = bounds[1]
+        zmin, zmax = bounds[2]
+        # zmin,zmax = -5,0
+        dx = xmax - xmin
+        dy = ymax - ymin
+        dz = zmax - zmin
+
+        # 2) camera (as before)
+        R    = np.linalg.norm(pts - pts.mean(axis=0), axis=1).max() * 1.5
+        az, el = np.deg2rad(45), np.deg2rad(10)
+        eye = dict(
+        x=R*np.cos(el)*np.cos(az),
+        y=R*np.cos(el)*np.sin(az),
+        z=R*np.sin(el)
+        )
+
+        # 3) update layout
+        if simulator.gsplat.name.startswith("sv_"):
+            fig.update_layout(
+            scene_camera=dict(eye=eye,
+                    up=dict(x=0, y=0, z=1)),
+            scene=dict(
+                aspectmode="manual",
+                aspectratio=dict(x=dx, y=dy, z=dz),
+                xaxis=dict(title='x',
+                        range=[xmin, xmax], autorange=False,
+                showticklabels=True,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                yaxis=dict(title='y',
+                        range=[ymax, ymin], autorange=False,
+                showticklabels=True,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                zaxis=dict(title='z',
+                        range=[zmax, zmin], autorange=False,
+                showticklabels=True,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+            ),
+            margin=dict(l=0, r=0, t=0, b=0),
+            width=1000, height=1000,
+            showlegend=False
+            )
+        else:
+            fig.update_layout(
+            scene_camera=dict(eye=eye,
+                    up=dict(x=0, y=0, z=1)),
+            scene=dict(
+                aspectmode="manual",
+                aspectratio=dict(x=dx, y=dy, z=dz),
+                xaxis=dict(title='',
+                        range=[xmin, xmax], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                yaxis=dict(title='',
+                        range=[ymax, ymin], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,),
+                zaxis=dict(title='',
+                        range=[zmax, zmin], autorange=False,
+                showticklabels=False,
+                showgrid=False,
+                zeroline=False,
+                showbackground=False,)
+            ),
+            margin=dict(l=0, r=0, t=0, b=0),
+            width=1000, height=1000,
+            showlegend=False
+            )
+
+        if not config.get('gif'):
+            print("Rendering the figure...")
+            fig.show()
+
+        if config.get('gif'):
+            # --- 4) Render & save each frame ---
+            out_dir = "/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space"
+            os.makedirs(out_dir, exist_ok=True)
+
+            cam = fig.layout.scene.camera
+            off_x = cam.eye.x - center[0]
+            off_y = cam.eye.y - center[1]
+            off_z = cam.eye.z - center[2]
+
+            # 3) Compute your radius in that XY‐offset plane
+            r = np.sqrt(off_x**2 + off_y**2) * 1   # distance from center to camera in XY
+            # (keep the same vertical offset)
+            z_offset = off_z                  # camera’s height above center
+
+            n_frames = 60
+            angles   = np.linspace(0, 360, n_frames, endpoint=False)
+            png_paths = []
+            # for i, ang in enumerate(angles):
+            #     θ = np.deg2rad(ang)
+            #     # build the *absolute* eye = center + offset
+            #     new_eye = dict(
+            #         x = center[0] + r * np.cos(θ),
+            #         y = center[1] + r * np.sin(θ),
+            #         z = center[2] + z_offset
+            #     )
+            #     fig.update_layout(scene_camera=dict(eye=new_eye))
+            #     path = f"{out_dir}/frame_{i:03d}.png"
+            #     fig.write_image(path, width=1000, height=1000)
+            #     png_paths.append(path)
+            num_trees = len(all_cylinder_lists)
+            color_list = ["purple", "orange", "cyan"]  # len == num_trees
+            # define at which frames you switch
+            # e.g. switch twice means three segments:
+            switch_points = [0,
+                            n_frames//3,
+                            2*n_frames//3,
+                            n_frames]  # segments: [0..20),[20..40),[40..60)
+            for i, ang in enumerate(np.linspace(0,360,n_frames,endpoint=False)):
+                # decide which segment we’re in
+                seg = next(j for j in range(len(switch_points)-1)
+                        if switch_points[j] <= i < switch_points[j+1])
+                cyl_list = all_cylinder_lists[seg]  # select the tree for this segment
+                tree_col  = color_list[seg]
+
+                # clear any old cylinder traces
+                # (we know trace 0 is the scatter; everything afterward is cylinders)
+                while len(fig.data) > 1:
+                    fig.data = fig.data[:-1]
+
+                # add the cylinders for *this* tree
+                for cyl in cyl_list:
+                    verts = np.asarray(cyl.vertices)
+                    tris  = np.asarray(cyl.triangles)
+                    fig.add_trace(go.Mesh3d(
+                        x=verts[:,0], y=verts[:,1], z=verts[:,2],
+                        i=tris[:,0], j=tris[:,1], k=tris[:,2],
+                        opacity=1.0,
+                        color=tree_col,
+                        showlegend=False
+                    ))
+
+                # rotate camera
+                θ = np.deg2rad(ang)
+                new_eye = dict(
+                    x = center[0] + r * np.cos(θ),
+                    y = center[1] + r * np.sin(θ),
+                    z = center[2] + z_offset
+                )
+                fig.update_layout(scene_camera=dict(eye=new_eye))
+
+                # write out frame
+                path = f"{out_dir}/frame_{i:03d}.png"
+                fig.write_image(path, width=1000, height=1000)
+                png_paths.append(path)
+
+            # --- 5) Build the GIF ---
+            images = [imageio.imread(p) for p in png_paths]
+            # gif_path = "/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space/.gif"
+            gif_path = f"/home/admin/StanfordMSL/SousVide-Semantic/notebooks/test_space/{simulator.gsplat.name}.gif"
+            imageio.mimsave(gif_path, images, duration=0.1)
+
+            # --- 6) Clean up the individual frames ---
+            for f in glob.glob(os.path.join(out_dir, "frame_*.png")):
+                os.remove(f)
+
+            print(f"Saved spinning GIF to {gif_path}")
+        
+    return trajset
