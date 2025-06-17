@@ -180,8 +180,8 @@ def generate_rrt_paths(
         pcd, pcd_arr, 
         objectives:List[str], obj_targets, 
         semantic_centroid, env_bounds,
-        rings, obstacles, 
-        Niter_RRT, viz=True
+        rings=None, obstacles=None, 
+        Niter_RRT=1000, viz=True
         ):
     def get_config_option(option_name, prompt, valid_options=None, default=None):
         if option_name in config:
@@ -462,35 +462,36 @@ def generate_rrt_paths(
                 showlegend=False
             ))
 
-            for obstacle, ring_pts in zip(obstacles, rings):
-                # flatten in case it's a column‐vector
-                ctr = obstacle.flatten()
+            if rings is not None and obstacles is not None:
+                for obstacle, ring_pts in zip(obstacles, rings):
+                    # flatten in case it's a column‐vector
+                    ctr = obstacle.flatten()
 
-                # skip empty or bad entries
-                if not isinstance(ring_pts, (list, np.ndarray)) or len(ring_pts) == 0:
-                    print(f"  → no ring points for centroid {ctr[:2]}; skipping")
-                    continue
+                    # skip empty or bad entries
+                    if not isinstance(ring_pts, (list, np.ndarray)) or len(ring_pts) == 0:
+                        print(f"  → no ring points for centroid {ctr[:2]}; skipping")
+                        continue
 
-                # take the very first sample
-                first_pt = np.array(ring_pts)[0]
+                    # take the very first sample
+                    first_pt = np.array(ring_pts)[0]
 
-                # compute X–Y distance between that sample and the centroid
-                radius = np.linalg.norm(first_pt[:2] - ctr[:2])
-                theta  = np.linspace(0, 2*np.pi, 200)
+                    # compute X–Y distance between that sample and the centroid
+                    radius = np.linalg.norm(first_pt[:2] - ctr[:2])
+                    theta  = np.linspace(0, 2*np.pi, 200)
 
-                # build a perfect circle around the centroid
-                x_ring = ctr[0] + radius * np.cos(theta)
-                y_ring = ctr[1] + radius * np.sin(theta)
-                z_ring = np.full_like(theta, ctr[2])   # use centroid's Z
+                    # build a perfect circle around the centroid
+                    x_ring = ctr[0] + radius * np.cos(theta)
+                    y_ring = ctr[1] + radius * np.sin(theta)
+                    z_ring = np.full_like(theta, ctr[2])   # use centroid's Z
 
-                # add to your Plotly figure
-                fig.add_trace(go.Scatter3d(
-                    x=x_ring, y=y_ring, z=z_ring,
-                    mode='lines',
-                    line=dict(color='green', width=4),
-                    name=f'Ring Radius={radius:.2f}',
-                    showlegend=False
-                ))
+                    # add to your Plotly figure
+                    fig.add_trace(go.Scatter3d(
+                        x=x_ring, y=y_ring, z=z_ring,
+                        mode='lines',
+                        line=dict(color='green', width=4),
+                        name=f'Ring Radius={radius:.2f}',
+                        showlegend=False
+                    ))
             
         # # once you have your point cloud `pts` (N×3 array):
         min_pt, max_pt = pts.min(axis=0), pts.max(axis=0)
