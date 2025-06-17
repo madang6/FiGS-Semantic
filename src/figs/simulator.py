@@ -79,14 +79,16 @@ class Simulator:
     
     def load_perception(self):
         with open(self.perception_path, 'r') as file:
-            perception_mode = yaml.safe_load(file)
-            visual_mode = perception_mode.get("visual_mode")
-            perception_mode = perception_mode.get("perception_mode")
+            perception_type = yaml.safe_load(file)
+            visual_mode = perception_type.get("visual_mode")
+            perception_type = perception_type.get("perception_type")
 
         if visual_mode not in ["rgb","semantic_depth"]:
             raise ValueError(f"Invalid visual mode: {visual_mode}")
         elif visual_mode == "semantic_depth":
             self.conFiG["perception"] = "semantic_depth"
+            self.conFiG["perception_type"] = perception_type
+            print(f"rendering simulation with {perception_type}.")
         else:
             self.conFiG["perception"] = "rgb"
 
@@ -224,6 +226,7 @@ class Simulator:
         T_c2b = self.conFiG["drone"]["T_c2b"]
 
         perception = self.conFiG["perception"]
+        perception_type = self.conFiG["perception_type"]
 
         # Derived Variables
         n_sim2ctl = int(hz_sim/policy.hz)  # Number of simulation steps per control step
@@ -267,17 +270,18 @@ class Simulator:
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
 
-                if clipseg is not None and perception == "semantic_depth" and query is not None:
+                if clipseg is not None and perception == "semantic_depth" and perception_type == "clipseg" and query is not None:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w)
                     # img_cr = icr["semantic"]
                     icr_rgb = image_dict["rgb"]
                     icr_depth = image_dict["depth"]
 
                     icr = clipseg.clipseg_hf_inference(image=icr_rgb, prompt=query)
-                elif perception == "semantic_depth" and query is not None:
+                elif perception == "semantic_depth" and perception_type != "clipseg" and query is not None:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                     icr = image_dict["semantic"]
                     icr_rgb = image_dict["rgb"]
+                    icr_depth = image_dict["depth"]
                 else:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w)
                     icr = image_dict["rgb"]
