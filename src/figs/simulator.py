@@ -196,6 +196,7 @@ class Simulator:
                  t0:float,tf:int,x0:np.ndarray,obj:Union[None,np.ndarray]|None=None,
                  query:str|None=None,
                  clipseg:bool=False,
+                 validation:bool=False
                  ) -> Tuple[np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """
         Simulates the flight.
@@ -243,6 +244,8 @@ class Simulator:
         Imgs_rgb = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
         Imgs_sem = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
         Imgs_depth = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
+        if validation:
+            Imgs_val = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
         # Iro = np.zeros((Nctl,height,width,channels),dtype=np.uint8)
         Xro[:,0] = x0
 
@@ -270,13 +273,15 @@ class Simulator:
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
 
-                if clipseg is not None and perception == "semantic_depth" and perception_type == "clipseg" and query is not None:
+                if clipseg is not None and perception == "semantic_depth" and perception_type == "clipseg" and query is not None: 
                     image_dict = self.gsplat.render_rgb(camera,T_c2w)
                     # img_cr = icr["semantic"]
                     icr_rgb = image_dict["rgb"]
                     icr_depth = image_dict["depth"]
 
                     icr = clipseg.clipseg_hf_inference(image=icr_rgb, prompt=query)
+                    if validation:
+                        icr_val = image_dict["semantic"]
                 elif perception == "semantic_depth" and perception_type != "clipseg" and query is not None:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                     icr = image_dict["semantic"]
@@ -328,7 +333,9 @@ class Simulator:
                 if query is not None:
                     Imgs_sem[k,:,:,:] = icr
                     Imgs_rgb[k,:,:,:] = icr_rgb
-                    Imgs_depth[k,:,:,:] = icr_depth
+                    Imgs_depth[k,:,:,:] = icr_depth                
+                    if validation:
+                        Imgs_val[k,:,:,:] = icr_val
                 else:
                     Imgs_rgb[k,:,:,:] = icr
                 Tro[k] = tcr
@@ -337,7 +344,9 @@ class Simulator:
                 Tsol[:,k] = tsol
                 Adv[:,k] = adv
 
-        if query is not None:
+        if validation and query is not None:
+            Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb,"validation":Imgs_val}
+        elif query is not None:
             Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb}
         else:
             Iro = {"rgb":Imgs_rgb}

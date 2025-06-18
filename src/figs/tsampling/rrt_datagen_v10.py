@@ -15,7 +15,8 @@ class Node:
 
 class RRT:
     def __init__(self, env_arr, env_pts, start, obj, bounds, altitude, algorithm='RRT', dimension=2, step_size=1.0, max_iter=10000,
-                  collision_check_radius=0.5, goal_exclusion_radius=0.5, collision_check_resolution=0.1, exact_step=False, bounded_step = False, prevent_edge_overlap=False):
+                  collision_check_radius=0.5, goal_exclusion_radius=0.5, collision_check_resolution=0.1, exact_step=False, bounded_step = False, prevent_edge_overlap=False,
+                  verbose=False):
         self.env_pts = env_pts
         self.env_arr = env_arr
         # print(f"Environment Points: {self.env_arr.shape}")
@@ -47,6 +48,11 @@ class RRT:
         self.altitude = altitude
         self.exclusion_radius = 0.45  # Determines how close the camera can get to any point in the environment
         self.min_edge_separation = 0.1  # Adjust this value as needed
+        self.verbose = verbose
+
+    def log(self, *args, **kwargs):
+        if self.verbose:
+            print(*args, **kwargs)
     
     def sample_free(self):
         # Sample a random point within the bounds
@@ -172,19 +178,19 @@ class RRT:
             new_position = self.steer(nearest_node, rnd_point)
 
             if not self.is_within_bounds(new_position):
-                print(f"Sampled point {rnd_point} is out of bounds.")
+                self.log(f"Sampled point {rnd_point} is out of bounds.")
                 continue  # Skip if out of bounds
 
             if self.is_within_goal_exclusion(new_position):
-                print(f"Sampled point {new_position} is within goal exclusion zone.")
+                self.log(f"Sampled point {new_position} is within goal exclusion zone.")
                 continue # Skip if within goal exclusion zone
 
             if self.is_within_obj_exclusion(new_position):
-                print(f"Sampled point {new_position} is within object exclusion zone.")
+                self.log(f"Sampled point {new_position} is within object exclusion zone.")
                 continue # Skip if within object exclusion zone
 
             if self.obstacle_collision(new_position):
-                print(f"Sampled point {new_position} is in collision with an obstacle.")
+                self.log(f"Sampled point {new_position} is in collision with an obstacle.")
                 continue  # Skip if collision detected
 
             # Initialize the new node's cost
