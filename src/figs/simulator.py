@@ -280,13 +280,14 @@ class Simulator:
                     icr_depth = image_dict["depth"]
 
                     icr = clipseg.clipseg_hf_inference(image=icr_rgb, prompt=query)
-                    if validation:
-                        icr_val = image_dict["semantic"]
                 elif perception == "semantic_depth" and perception_type != "clipseg" and query is not None:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                     icr = image_dict["semantic"]
                     icr_rgb = image_dict["rgb"]
                     icr_depth = image_dict["depth"]
+
+                    if validation:
+                        icr_val = clipseg.clipseg_hf_inference(image=icr_rgb, prompt=query)
                 else:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w)
                     icr = image_dict["rgb"]
@@ -334,7 +335,7 @@ class Simulator:
                     Imgs_sem[k,:,:,:] = icr
                     Imgs_rgb[k,:,:,:] = icr_rgb
                     Imgs_depth[k,:,:,:] = icr_depth                
-                    if validation:
+                    if validation and perception_type != "clipseg":
                         Imgs_val[k,:,:,:] = icr_val
                 else:
                     Imgs_rgb[k,:,:,:] = icr
@@ -344,7 +345,7 @@ class Simulator:
                 Tsol[:,k] = tsol
                 Adv[:,k] = adv
 
-        if validation and query is not None:
+        if validation and perception_type != "clipseg" and query is not None:
             Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb,"validation":Imgs_val}
         elif query is not None:
             Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb}
