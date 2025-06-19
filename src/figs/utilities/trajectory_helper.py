@@ -717,8 +717,6 @@ def process_obstacle_clusters_and_sample(
         R_cluster = radii.max()
         R = R_cluster + clearance
 
-        centroids.append(ctr)
-
         # 3b) generate equal‐angle candidates
         thetas = np.linspace(0, 2*np.pi, sample_size, endpoint=False)
         circle = np.vstack([
@@ -735,7 +733,17 @@ def process_obstacle_clusters_and_sample(
             if not np.all((minb <= p) & (p <= maxb)):
                 continue
             good.append(p)
+
+        if np.array(good).size == 0:
+            continue
+        
+        # append centroid
+        centroids.append(ctr)
+        # append forward ring
         rings.append(np.array(good))
+        # append reversed ring
+        centroids.append(ctr)
+        rings.append(np.array(good[::-1]))
 
     return rings, centroids
 
