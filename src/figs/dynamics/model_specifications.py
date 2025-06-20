@@ -94,3 +94,37 @@ def generate_specifications(
     quad["name"] = name
     
     return quad
+
+
+
+def generate_glider_specifications(drn_prms):
+    """
+    Returns a dict of parameters for the glider model using the drn_prms format:
+      drn_prms keys: 'mass','wing_area','air_density','gravity',
+                     'a0','a1','b0','b2','alpha_min','alpha_max',
+                     'phi_min','phi_max','beta_min','beta_max'
+    """
+    # Polar functions
+    def C_L(alpha):
+        return drn_prms['a1'] * alpha + drn_prms.get('a0', 0)
+    def C_D(alpha):
+        return drn_prms['b2'] * alpha**2 + drn_prms.get('b0', 0)
+
+    # Wind profile: linear shear example
+    def wind(h):
+        return {
+            'Wx': 0,
+            'Wy': -0.025 * h,
+            'Wz': 0
+        }
+
+    specs = {
+        'm':    drn_prms['mass'],
+        'S':    drn_prms['wing_area'],
+        'rho':  drn_prms.get('air_density', 1.225),
+        'g':    drn_prms.get('gravity', 9.81),
+        'C_L':  C_L,
+        'C_D':  C_D,
+        'wind': wind
+    }
+    return specs
