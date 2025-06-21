@@ -1326,7 +1326,6 @@ def parameterize_RRT_trajectories(branches, obj_loc, constant_velocity, sampling
             nodes_RRT.append(result[1])
             
     if viz:
-        print("I am here")
         return new_branches, nodes_RRT, debug_dict
     else:
         return new_branches, nodes_RRT
