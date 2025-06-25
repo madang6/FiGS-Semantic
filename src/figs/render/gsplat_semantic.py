@@ -230,9 +230,12 @@ class GSplat():
 
         if query is None:
             return {"rgb":image_rgb, "depth": image_depth}
+        elif query == "null":
+            sem = outputs.get(self.perception_mode, outputs.get("similarity", outputs["rgb"]))
+        else:
+            sem = outputs.get(self.perception_mode, outputs.get("similarity", outputs["rgb"]))
+            sem = self.render_rescale(sem)
     
-        sem = outputs.get(self.perception_mode, outputs.get("similarity", outputs["rgb"]))
-        sem = self.render_rescale(sem)
         sem = apply_colormap(sem, ColormapOptions("turbo"))
         image_sem = (255 * sem.cpu().numpy()).astype(np.uint8)
 
