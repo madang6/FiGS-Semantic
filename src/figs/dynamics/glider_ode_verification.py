@@ -1,23 +1,24 @@
 import numpy as np
 import casadi as ca
 import pytest
-from model_equations import export_glider_ode_model
-from model_specifications import generate_glider_specifications
+
+from figs.dynamics.model_equations import export_glider_ode_model
+from figs.dynamics.model_specifications import generate_glider_specifications
 
 def numerical_jacobian(f, x, u, eps=1e-6):
     """
     Compute numerical Jacobian df/dx by finite differences.
-    f: function f(x, u) returning a vector
+    f: function f(x, u) returning a vector (can be CasADi DM or NumPy array)
     x: state vector (nx,)
     u: control vector (nu,)
     """
-    f0 = f(x, u).flatten()
+    f0 = np.array(f(x, u)).flatten()
     nx = x.size
     J = np.zeros((f0.size, nx))
     for i in range(nx):
         dx = np.zeros(nx)
         dx[i] = eps
-        f1 = f(x + dx, u).flatten()
+        f1 = np.array(f(x + dx, u)).flatten()
         J[:, i] = (f1 - f0) / eps
     return J
 
@@ -52,20 +53,21 @@ def test_zero_wind_kinematics(glider_model_and_func):
     """
     With zero wind, the kinematic components should match the expected cos/sin relations.
     """
-    specs, model, f, _ = glider_model_and_func
+    specs, _, f, _ = glider_model_and_func
     # Override wind to zero
     specs['wind'] = lambda h: {'Wx': 0.0, 'Wy': 0.0, 'Wz': 0.0}
     model = export_glider_ode_model(specs)
-    f = ca.Function('f0', [model.x, model.u], [model.f_expl_expr])
+    f0 = ca.Function('f0', [model.x, model.u], [model.f_expl_expr])
     # Define a test state/control
     x = np.array([10.0, 20.0, 100.0, 15.0, np.pi/6, np.pi/4, 0.0])
     u = np.array([0.1, 0.2, 0.0])
-    xdot = f(x, u).flatten()
-    V = x[3]; gamma = x[4]; psi = x[5]
+    xdot_dm = f0(x, u)
+    xdot = np.array(xdot_dm).flatten()
+    V     = x[3]; gamma = x[4]; psi = x[5]
     # Check kinematic parts
     assert np.isclose(xdot[0], V * np.cos(gamma) * np.cos(psi), atol=1e-6)
     assert np.isclose(xdot[1], V * np.cos(gamma) * np.sin(psi), atol=1e-6)
-    assert np.isclose(xdot[2], V * np.sin(gamma), atol=1e-6)
+    assert np.isclose(xdot[2], V * np.sin(gamma),                 atol=1e-6)
 
 def test_jacobian_matches_finite_difference(glider_model_and_func):
     """
@@ -77,11 +79,18 @@ def test_jacobian_matches_finite_difference(glider_model_and_func):
     u = np.array([0.05, -0.05, 0.0])
     # Evaluate CasADi Jacobian
     J_casadi = np.array(J_casadi_f(x, u)).squeeze()
-    # Evaluate numerical Jacobian
-    J_num = numerical_jacobian(lambda xx, uu: f(xx, uu), x, u)
+    # Evaluate numerical Jacobian (convert DM→np internally)
+    J_num = numerical_jacobian(lambda xx, uu: np.array(f(xx, uu)), x, u)
     # Compare
     assert np.allclose(J_casadi, J_num, atol=1e-4, rtol=1e-4)
 
 if __name__ == "__main__":
+    '''
+    This is a test script to verify the glider ODE model and its Jacobian.
+    We compare CasADi's analytical Jacobian with a numerical approximation.
+
+    Additionally, we check that the kinematic equations behave as expected
+    when the wind is set to zero.
+    '''
     pytest.main()
 
