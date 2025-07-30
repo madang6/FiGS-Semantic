@@ -16,6 +16,77 @@ from figs.tsampling.rrt_datagen_v10 import *
 
 import numpy as np
 
+def generate_spin_keyframes(
+    name: str,
+    Nco: int,
+    xyz: np.ndarray,
+    theta0: float,
+    theta1: float,
+    time: float,
+    N: int = 35
+) -> dict:
+    """
+    Spin in place from theta0→theta1 (shortest arc) + 360°,
+    constant-rate implied by uniform spacing of keyframes,
+    but derivatives left unconstrained except at endpoints.
+    Produces N+1 keyframes (including start/end).
+    """
+    # 1) shortest signed Δθ
+    dθ        = ((theta1 - theta0 + np.pi) % (2*np.pi)) - np.pi
+    direction = np.sign(dθ) if dθ != 0 else 1.0
+    abs_dθ    = abs(dθ)
+
+    # 2) total angular distance
+    total_ang = abs_dθ + 2*np.pi + np.pi/4
+
+    rate = (abs_dθ + 2*np.pi + np.pi/4) / time  # angular velocity
+
+    def make_fo(angle: float, 
+                #rate: float, 
+                # is_buffer: bool, 
+                is_intermediate: bool):
+        fo = []
+        for idx, val in enumerate((*xyz, angle)):
+            if idx < 3:
+                if is_intermediate:
+                    fo.append([val, None, None])
+                # elif is_buffer:
+                #     fo.append([val, 
+                #                None, None])
+                else:
+                    fo.append([val, 0.0])
+            else:
+                if is_intermediate:
+                    fo.append([val, None, None])
+                # elif is_buffer:
+                #     fo.append([val, 
+                #                None, None])
+                else:
+                    fo.append([val, rate])
+        return fo
+
+    # 4) build dense keyframes
+    keyframes = {}
+    for k in range(N+1):
+        frac           = k / N
+        t_k            = frac * time
+        θ_k            = theta0 + direction * frac * total_ang
+        is_end         = (k == 0 or k == N)
+        is_buffer      = (k == 1 or k == N-1)
+        is_intermediate= not (is_end or is_buffer)
+
+        keyframes[f"fo{k}"] = {
+            "t": t_k,
+            "fo": make_fo(
+                θ_k,
+                # ω,
+                # is_buffer=is_buffer,
+                is_intermediate = not is_end
+            )
+        }
+
+    return {"name": name, "Nco": Nco, "keyframes": keyframes}
+
 def filter_branches(paths, top_k=1, hover_mode=False, verbose=False):
     """
     Filters branches by hover-mode + adjacency, computes furthest reach, then
