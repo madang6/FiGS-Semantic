@@ -13,6 +13,12 @@ from typing import Dict,Tuple,Union
 
 from figs.tsampling.rrt_datagen_v10 import *
 
+# Matplotlib for visualization (imported at module level for global control)
+import matplotlib.pyplot as plt
+
+# Import global figure display control from separate module (avoids circular imports)
+from figs.utilities.display_config import get_figure_display, set_figure_display
+
 
 import numpy as np
 
@@ -177,6 +183,361 @@ def generate_spin_keyframes(
 
     return {"name": name, "Nco": Nco, "keyframes": keyframes}
 
+
+def transforms_to_keyframes(
+    json_path: str,
+    name: str,
+    Nco: int,
+    N: int = 35,
+    constant_velocity: float = 1.0
+) -> dict:
+    """
+    Convert camera transforms from transforms.json into keyframes.json format.
+
+    Creates N+1 keyframes that follow the full camera trajectory (position + yaw),
+    with speed-based timing for constant velocity along the path.
+
+    Args:
+        json_path: Path to transforms.json file
+        name: Trajectory name for output dict
+        Nco: Number of polynomial coefficients
+        N: Number of keyframes (default 35)
+        constant_velocity: Speed along path in world units/second (default 1.0)
+
+    Returns:
+        A dict in keyframes format: {"name": str, "Nco": int, "keyframes": {...}}
+    """
+    import json
+    from scipy.interpolate import interp1d
+
+    # 1) Load transforms.json
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+
+    frames = data['frames']
+
+    # 2) Extract positions and compute yaw angles from each frame
+    positions = []
+    yaw_angles = []
+
+    for frame in frames:
+        T = np.array(frame['transform_matrix'])
+
+        # Position: last column, first 3 rows
+        pos = T[0:3, 3]
+        # pos[2] = -pos[2]  # Flip z-axis to match simulation coordinate system
+        positions.append(pos)
+
+        # Extract rotation matrix (3x3 upper left)
+        R = T[0:3, 0:3]
+
+        # Camera -Z direction (camera forward/look direction)
+        # In camera frame: -Z is [0, 0, -1]
+        # In world frame: apply rotation
+        cam_neg_z = R @ np.array([0, 0, -1])
+
+        # Project onto XY plane and compute yaw (rotation about world Z axis)
+        # Yaw = atan2(Y_component, X_component)
+        yaw = np.arctan2(cam_neg_z[1], cam_neg_z[0])
+        yaw_angles.append(yaw)
+
+    positions = np.array(positions)  # shape (M, 3)
+    yaw_angles = np.array(yaw_angles)  # shape (M,)
+
+    # 3) Compute distances and path parameterization
+    diffs = np.diff(positions, axis=0)
+    segment_lengths = np.linalg.norm(diffs, axis=1)
+    cumulative_dist = np.insert(np.cumsum(segment_lengths), 0, 0)
+    total_distance = cumulative_dist[-1]
+
+    if total_distance < 1e-6:
+        raise ValueError(f"Transforms have zero total path length (distance={total_distance:.2e})")
+
+    # Total time to traverse path at constant velocity
+    total_time = total_distance / constant_velocity
+
+    # 4) Unwrap yaw angles to avoid discontinuities at ±π
+    # Use numpy's unwrap function which properly handles multi-rotation paths
+    unwrapped_yaw = np.unwrap(yaw_angles)
+
+    # 5) Create interpolators for positions and yaw vs cumulative distance
+    interp_x = interp1d(cumulative_dist, positions[:, 0], kind='cubic',
+                       bounds_error=False, fill_value='extrapolate')
+    interp_y = interp1d(cumulative_dist, positions[:, 1], kind='cubic',
+                       bounds_error=False, fill_value='extrapolate')
+    interp_z = interp1d(cumulative_dist, positions[:, 2], kind='cubic',
+                       bounds_error=False, fill_value='extrapolate')
+    interp_yaw = interp1d(cumulative_dist, unwrapped_yaw, kind='cubic',
+                         bounds_error=False, fill_value='extrapolate')
+
+    # 6) Sample N+1 keyframes evenly along the path (by distance)
+    path_samples = np.linspace(0, total_distance, N + 1)
+
+    keyframes = {}
+    for k in range(N + 1):
+        s_k = path_samples[k]
+        t_k = (s_k / total_distance) * total_time
+
+        # Interpolate position and yaw
+        x_k = float(interp_x(s_k))
+        y_k = float(interp_y(s_k))
+        z_k = float(interp_z(s_k))
+        theta_k = float(interp_yaw(s_k))
+
+        is_endpoint = (k == 0 or k == N)
+
+        if is_endpoint:
+            # At endpoints: use velocity format [value, rate]
+            # Compute velocities by finite difference
+            if k == 0:
+                # Forward difference at start
+                s_next = path_samples[1]
+                x_next = float(interp_x(s_next))
+                y_next = float(interp_y(s_next))
+                z_next = float(interp_z(s_next))
+                theta_next = float(interp_yaw(s_next))
+
+                dt = (s_next / total_distance) * total_time - t_k
+                if dt > 1e-8:
+                    vx = (x_next - x_k) / dt
+                    vy = (y_next - y_k) / dt
+                    vz = (z_next - z_k) / dt
+                    omega = (theta_next - theta_k) / dt
+                else:
+                    vx = vy = vz = omega = 0.0
+            else:
+                # Backward difference at end
+                s_prev = path_samples[N - 1]
+                x_prev = float(interp_x(s_prev))
+                y_prev = float(interp_y(s_prev))
+                z_prev = float(interp_z(s_prev))
+                theta_prev = float(interp_yaw(s_prev))
+
+                dt = t_k - (s_prev / total_distance) * total_time
+                if dt > 1e-8:
+                    vx = (x_k - x_prev) / dt
+                    vy = (y_k - y_prev) / dt
+                    vz = (z_k - z_prev) / dt
+                    omega = (theta_k - theta_prev) / dt
+                else:
+                    vx = vy = vz = omega = 0.0
+
+            fo = [
+                [x_k, vx],
+                [y_k, vy],
+                [z_k, vz],
+                [theta_k, omega]
+            ]
+        else:
+            # At intermediate keyframes: use unconstrained format [value, None, None]
+            fo = [
+                [x_k, None, None],
+                [y_k, None, None],
+                [z_k, None, None],
+                [theta_k, None, None]
+            ]
+
+        keyframes[f"fo{k}"] = {
+            "t": t_k,
+            "fo": fo
+        }
+
+    return {"name": name, "Nco": Nco, "keyframes": keyframes}
+
+
+def keyframes_to_dense_trajectory(
+    keyframes_dict: dict,
+    sampling_frequency: float = 100.0,
+    pad_time: float = 2.0,
+    thrust_magnitude: float = 0.4
+) -> tuple:
+    """
+    Convert keyframes.json format to dense drone state trajectory.
+
+    Converts the keyframes format (output of transforms_to_keyframes or generate_spin_keyframes)
+    into a dense time-sampled state trajectory matching the format produced by process_branch().
+
+    Args:
+        keyframes_dict: Dictionary with keys {"name", "Nco", "keyframes"}
+                       where keyframes is {"fo0": {"t": float, "fo": [...]}, ...}
+        sampling_frequency: Dense sampling frequency in Hz (default 100)
+        pad_time: Padding time in seconds at trajectory end (default 2.0)
+        thrust_magnitude: Constant thrust/control value (default 0.4)
+
+    Returns:
+        Tuple of (dense_trajectory, keyframe_data):
+        - dense_trajectory: (18, M) numpy array where M = number of time samples
+          Row 0: time (t)
+          Rows 1-3: position (x, y, z)
+          Rows 4-6: velocity (vx, vy, vz)
+          Rows 7-10: quaternion (qx, qy, qz, qw)
+          Rows 11-13: angular rates (wx, wy, wz)
+          Rows 14-17: control/thrust (u1, u2, u3, u4)
+        - keyframe_data: List of (time, position, quaternion) tuples at keyframe times
+    """
+    from scipy.interpolate import interp1d
+
+    keyframes = keyframes_dict['keyframes']
+
+    # 1) Extract keyframe data
+    kf_times = []
+    kf_positions = []
+    kf_yaws = []
+
+    for k in sorted(keyframes.keys(), key=lambda x: int(x[2:])):
+        kf = keyframes[k]
+        t_k = kf['t']
+        fo = kf['fo']
+
+        x_k = fo[0][0]
+        y_k = fo[1][0]
+        z_k = fo[2][0]
+        theta_k = fo[3][0]
+
+        kf_times.append(t_k)
+        kf_positions.append([x_k, y_k, z_k])
+        kf_yaws.append(theta_k)
+
+    kf_times = np.array(kf_times)
+    kf_positions = np.array(kf_positions)  # shape (N_kf, 3)
+    kf_yaws = np.array(kf_yaws)  # shape (N_kf,)
+
+    final_time = kf_times[-1]
+    dt = 1.0 / sampling_frequency
+
+    # 2) Create dense time grid
+    times = np.arange(0, final_time + dt / 2, dt)
+
+    # 3) Create interpolators for positions and yaw
+    interp_x = interp1d(kf_times, kf_positions[:, 0], kind='cubic',
+                       bounds_error=False, fill_value='extrapolate')
+    interp_y = interp1d(kf_times, kf_positions[:, 1], kind='cubic',
+                       bounds_error=False, fill_value='extrapolate')
+    interp_z = interp1d(kf_times, kf_positions[:, 2], kind='cubic',
+                       bounds_error=False, fill_value='extrapolate')
+    interp_yaw = interp1d(kf_times, kf_yaws, kind='cubic',
+                         bounds_error=False, fill_value='extrapolate')
+
+    # 4) Interpolate at dense time points
+    x_dense = interp_x(times)
+    y_dense = interp_y(times)
+    z_dense = interp_z(times)
+    yaw_dense = interp_yaw(times)
+
+    # 5) Compute velocities via finite difference
+    vx_dense = np.gradient(x_dense, dt)
+    vy_dense = np.gradient(y_dense, dt)
+    vz_dense = np.gradient(z_dense, dt)
+
+    # 6) Compute quaternions from yaw (ZYX Euler with pitch=roll=0)
+    quaternions = []
+    for yaw in yaw_dense:
+        q = Rotation.from_euler("ZYX", [yaw, 0.0, 0.0], degrees=False).as_quat()
+        quaternions.append(q)
+    quaternions = np.array(quaternions)  # shape (M, 4)
+
+    # Ensure quaternion sign continuity
+    for i in range(1, len(quaternions)):
+        quaternions[i] = obedient_quaternion(quaternions[i], quaternions[i-1])
+
+    # 7) Compute angular rates from quaternion derivatives
+    angular_rates = []
+    for i in range(len(quaternions) - 1):
+        q_curr = Rotation.from_quat(quaternions[i])
+        q_next = Rotation.from_quat(quaternions[i + 1])
+        delta_q = q_curr.inv() * q_next
+
+        # Convert to axis-angle and compute angular rate
+        angle = delta_q.magnitude()
+        if angle > 1e-8:
+            axis = delta_q.as_rotvec() / angle
+            omega = (axis * angle) / dt
+        else:
+            omega = np.zeros(3)
+
+        angular_rates.append(omega)
+
+    # Append last angular rate
+    angular_rates.append(angular_rates[-1] if angular_rates else np.zeros(3))
+    angular_rates = np.array(angular_rates)  # shape (M, 3)
+
+    # 8) Add padding
+    if pad_time > 0:
+        n_pad = int(np.ceil(pad_time / dt))
+        pad_times = np.linspace(final_time, final_time + pad_time, n_pad)
+        times = np.concatenate([times, pad_times[1:]])
+
+        # Repeat last values for padding (zero velocity for padding)
+        x_dense = np.concatenate([x_dense, np.full(n_pad - 1, x_dense[-1])])
+        y_dense = np.concatenate([y_dense, np.full(n_pad - 1, y_dense[-1])])
+        z_dense = np.concatenate([z_dense, np.full(n_pad - 1, z_dense[-1])])
+
+        # Zero velocities during padding
+        vx_dense = np.concatenate([vx_dense, np.zeros(n_pad - 1)])
+        vy_dense = np.concatenate([vy_dense, np.zeros(n_pad - 1)])
+        vz_dense = np.concatenate([vz_dense, np.zeros(n_pad - 1)])
+
+        # Repeat last quaternion
+        quaternions = np.vstack([quaternions, np.tile(quaternions[-1], (n_pad - 1, 1))])
+
+        # Zero angular rates during padding
+        angular_rates = np.vstack([angular_rates, np.zeros((n_pad - 1, 3))])
+
+    # 9) Build dense trajectory array (18 rows)
+    M = len(times)
+    dense_trajectory = np.zeros((18, M))
+
+    dense_trajectory[0, :] = times
+    dense_trajectory[1, :] = x_dense
+    dense_trajectory[2, :] = y_dense
+    dense_trajectory[3, :] = z_dense
+    dense_trajectory[4, :] = vx_dense
+    dense_trajectory[5, :] = vy_dense
+    dense_trajectory[6, :] = vz_dense
+    dense_trajectory[7:11, :] = quaternions.T
+    dense_trajectory[11:14, :] = angular_rates.T
+    dense_trajectory[14:18, :] = thrust_magnitude  # Constant thrust
+
+    # 10) Collect keyframe data at original keyframe times
+    keyframe_data = []
+    for k, kf_time in enumerate(kf_times):
+        # Find closest time index
+        idx = np.argmin(np.abs(times - kf_time))
+        pos = dense_trajectory[1:4, idx]
+        quat = dense_trajectory[7:11, idx]
+        keyframe_data.append((kf_time, pos, quat))
+
+    return dense_trajectory, keyframe_data
+
+
+def save_keyframes_to_json(
+    keyframes_dict: dict,
+    output_path: str
+) -> None:
+    """
+    Save keyframes dictionary to JSON file in configs/course format.
+
+    Takes a keyframes dict (from transforms_to_keyframes or generate_spin_keyframes)
+    and saves it to a JSON file, removing the 'name' field if present.
+
+    Args:
+        keyframes_dict: Dictionary with {"name", "Nco", "keyframes"}
+        output_path: Path to output JSON file
+    """
+    import json
+
+    # Create a new dict without the 'name' field for configs/course format
+    output_dict = {
+        "Nco": keyframes_dict["Nco"],
+        "keyframes": keyframes_dict["keyframes"]
+    }
+
+    # Write to JSON file with nice formatting
+    with open(output_path, 'w') as f:
+        json.dump(output_dict, f, indent=2)
+
+    print(f"✓ Saved keyframes to {output_path}")
+
 # def generate_spin_keyframes(
 #     name: str,
 #     Nco: int,
@@ -287,6 +648,7 @@ def filter_branches(paths, top_k=1, hover_mode=False, verbose=False):
 
     skip_nodes = 2
     prefiltered = []
+    print("how many in top k?", top_k)
 
     log("=== Stage 1: Initial pruning ===")
     for branch_idx, positions in enumerate(paths):
@@ -772,6 +1134,10 @@ def process_obstacle_clusters_and_sample(
     return rings, centroids
 
 def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
+    # Skip figure creation entirely if display is disabled (prevents memory leaks during RL training)
+    if not get_figure_display():
+        return
+    
     def extract_yaw_from_quaternion(quaternions):
         """
         Extract the yaw (heading angle) from a set of quaternions.
@@ -897,7 +1263,9 @@ def debug_figures_RRT(obj_loc, initial, original, smoothed, time_points):
 
     # Adjust layout and show
     plt.tight_layout()
-    plt.show()
+    # Only show figures if display is enabled (disabled during RL training)
+    if get_figure_display():
+        plt.show()
 
 def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, threshold_distance, viz=False, randint=None, loiter=False):
     """
@@ -918,9 +1286,16 @@ def process_branch(branch_id, positions, dt, constant_velocity, obj_loc, pad_t, 
     """
         # Smooth the trajectory in position space using cubic spline
     def smooth_initial_trajectory(traj_x, traj_y, traj_z, traj_t, dense_time_points):
-        spline_x = CubicSpline(traj_t, traj_x)
-        spline_y = CubicSpline(traj_t, traj_y)
-        spline_z = CubicSpline(traj_t, traj_z)
+        # Sort trajectory points by time (CubicSpline requires strictly increasing sequence)
+        sort_indices = np.argsort(traj_t)
+        traj_t_sorted = np.array(traj_t)[sort_indices]
+        traj_x_sorted = traj_x[sort_indices]
+        traj_y_sorted = traj_y[sort_indices]
+        traj_z_sorted = traj_z[sort_indices]
+
+        spline_x = CubicSpline(traj_t_sorted, traj_x_sorted)
+        spline_y = CubicSpline(traj_t_sorted, traj_y_sorted)
+        spline_z = CubicSpline(traj_t_sorted, traj_z_sorted)
         smooth_x = spline_x(dense_time_points)
         smooth_y = spline_y(dense_time_points)
         smooth_z = spline_z(dense_time_points)
@@ -1662,6 +2037,50 @@ def TS_to_tXU(Tps:np.ndarray,CPs:np.ndarray,
                 
         tXU[0,k] = tk
         tXU[1:,k] = xu
+
+    return tXU
+
+def TsFO_to_tXU(Ts:np.ndarray, FO:np.ndarray,
+                m:float, tn:float) -> np.ndarray:
+    """
+    Converts a time-flat output trajectory to a time-state-control rollout.
+    Used by MinTimeSnap trajectory optimization which directly outputs flat outputs.
+
+    Args:
+        - Ts:   Time array (1D).
+        - FO:   Flat output array (shape: [N, 4, derivatives]).
+        - m:    Mass of quadcopter.
+        - tn:   Total thrust available.
+
+    Returns:
+        - tXU:  Time + State + Control rollout (shape: [18, N]).
+    """
+
+    # Create quad spec dictionary for fo_to_xu
+    quad = {"m": m, "tn": tn}
+
+    # Number of samples
+    N = len(Ts)
+
+    # Process each time step
+    for k in range(N):
+        # Extract flat output at this time step
+        fok = FO[k, :, :]
+
+        # Convert to state/control
+        xu = fo_to_xu(fok, quad)
+
+        # Initialize output array on first iteration
+        if k == 0:
+            ntxu = len(xu) + 1  # +1 for time
+            tXU = np.zeros((ntxu, N))
+        else:
+            # Ensure quaternion continuity
+            xu[6:10] = obedient_quaternion(xu[6:10], tXU[7:11, k-1])
+
+        # Store time and state/control
+        tXU[0, k] = Ts[k]
+        tXU[1:, k] = xu
 
     return tXU
 

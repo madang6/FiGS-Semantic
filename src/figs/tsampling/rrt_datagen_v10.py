@@ -6,6 +6,9 @@ import random
 from scipy.spatial import cKDTree
 import matplotlib.pyplot as plt
 
+# Import global figure display control (prevents memory leaks during RL training)
+from figs.utilities.display_config import get_figure_display
+
 class Node:
     def __init__(self, position, parent=None):
         self.position = position  # NumPy array
@@ -272,6 +275,10 @@ class RRT:
         return path
 
     def plot_tree(self):
+        # Skip figure creation entirely if display is disabled (prevents memory leaks during RL training)
+        if not get_figure_display():
+            return
+        
         plt.figure(figsize=(16, 16))
         
         # Plot each edge in the tree (i.e., between a node and its parent)
@@ -321,4 +328,6 @@ class RRT:
 
         # plt.ylim(self.bounds[1])
         plt.legend()
-        plt.show()
+        # Only show figures if display is enabled (disabled during RL training)
+        if get_figure_display():
+            plt.show()

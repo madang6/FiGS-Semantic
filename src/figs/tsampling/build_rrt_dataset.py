@@ -13,6 +13,7 @@ import plotly.io as pio
 import plotly.graph_objects as go
 
 from figs.render.gsplat_semantic import GSplat
+from figs.utilities.display_config import get_figure_display
 import figs.scene_editing.scene_editing_utils as scdt
 import figs.utilities.trajectory_helper as th
 from figs.tsampling.rrt_datagen_v10 import *
@@ -586,7 +587,7 @@ def generate_rrt_paths(
             showlegend=False
             )
 
-        if not config.get('gif') and viz:
+        if not config.get('gif') and viz and get_figure_display():
             print("Rendering the figure...")
             fig.show()
 
@@ -979,7 +980,7 @@ def visualize_rrt_trajectories(trajset,
             showlegend=False
             )
 
-        if not config.get('gif'):
+        if not config.get('gif') and get_figure_display():
             print("Rendering the figure...")
             fig.show()
 

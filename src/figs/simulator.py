@@ -206,7 +206,8 @@ class Simulator:
                  query:str|None=None,
                  vision_processor:Union[None,VisionProcessorBase]=None,
                  validation:bool=False,
-                 verbose:bool=False
+                 verbose:bool=False,
+                 progress_callback=None
                  ) -> Tuple[np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """
         Simulates the flight.
@@ -285,11 +286,15 @@ class Simulator:
 
             # Control
             if i % n_sim2ctl == 0:
+                # Call progress callback if provided
+                if progress_callback is not None:
+                    k = i//n_sim2ctl
+                    progress_callback(current_step=k, total_steps=Nctl, sim_time=tcr)
                 # Get current image
                 Tb2w = th.xv_to_T(xcr)
                 T_c2w = Tb2w@T_c2b
 
-                if vision_processor is not None and perception == "semantic_depth" and perception_type == "clipseg" and query is not None:
+                if vision_processor is not None and perception == "semantic_depth" and perception_type in ["clipseg", "amradio"] and query is not None:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w)
                     # img_cr = icr["semantic"]
                     icr_rgb = image_dict["rgb"]
@@ -299,7 +304,7 @@ class Simulator:
                     end = time.time()
                     if verbose:
                         times.append(end-start)
-                elif perception == "semantic_depth" and perception_type != "clipseg" and query is not None:
+                elif perception == "semantic_depth" and perception_type not in ["clipseg", "amradio"] and query is not None:
                     image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                     icr = image_dict["semantic"]
                     icr_rgb = image_dict["rgb"]
@@ -357,7 +362,7 @@ class Simulator:
                     Imgs_sem[k,:,:,:] = icr
                     Imgs_rgb[k,:,:,:] = icr_rgb
                     Imgs_depth[k,:,:,:] = icr_depth                
-                    if validation and perception_type != "clipseg":
+                    if validation and perception_type not in ["clipseg", "amradio"]:
                         Imgs_val[k,:,:,:] = icr_val
                 else:
                     Imgs_rgb[k,:,:,:] = icr
@@ -375,7 +380,7 @@ class Simulator:
             print(f"Min time/frame: {min(times)*1000:.1f} ms")
             print(f"Max time/frame: {max(times)*1000:.1f} ms")
 
-        if validation and perception_type != "clipseg" and query is not None:
+        if validation and perception_type not in ["clipseg", "amradio"] and query is not None:
             Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb,"validation":Imgs_val}
         elif query is not None:
             Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb}
@@ -504,7 +509,7 @@ class Simulator:
                     Tb2w = th.xv_to_T(xcr)
                     T_c2w = Tb2w@T_c2b
 
-                    if vision_processor is not None and perception == "semantic_depth" and perception_type == "clipseg" and query is not None:
+                    if vision_processor is not None and perception == "semantic_depth" and perception_type in ["clipseg", "amradio"] and query is not None:
                         image_dict = self.gsplat.render_rgb(camera,T_c2w)
                         # img_cr = icr["semantic"]
                         icr_rgb = image_dict["rgb"]
@@ -514,7 +519,7 @@ class Simulator:
                         end = time.time()
                         if verbose:
                             times.append(end-start)
-                    elif perception == "semantic_depth" and perception_type != "clipseg" and query is not None:
+                    elif perception == "semantic_depth" and perception_type not in ["clipseg", "amradio"] and query is not None:
                         image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                         icr = image_dict["semantic"]
                         icr_rgb = image_dict["rgb"]
@@ -745,7 +750,7 @@ class Simulator:
                         Imgs_rgb[k,:,:,:] = icr_rgb
                         Imgs_depth[k,:,:,:] = icr_depth                
                         # Store validation image if needed
-                        if validation and perception_type != "clipseg":
+                        if validation and perception_type not in ["clipseg", "amradio"]:
                             Imgs_val[k,:,:,:] = icr_val
                     else:
                         # Just store RGB image if no query provided
@@ -769,7 +774,7 @@ class Simulator:
 
             # ==== PREPARE RETURN DATA ====
             # Package images based on what was collected
-            if validation and perception_type != "clipseg" and query is not None:
+            if validation and perception_type not in ["clipseg", "amradio"] and query is not None:
                 Iro = {"semantic": Imgs_sem, "depth": Imgs_depth, "rgb": Imgs_rgb, "validation": Imgs_val}
             elif query is not None:
                 Iro = {"semantic": Imgs_sem, "depth": Imgs_depth, "rgb": Imgs_rgb}
@@ -897,7 +902,7 @@ class Simulator:
                     Tb2w = th.xv_to_T(xcr)
                     T_c2w = Tb2w@T_c2b
 
-                    if vision_processor is not None and perception == "semantic_depth" and perception_type == "clipseg" and query is not None:
+                    if vision_processor is not None and perception == "semantic_depth" and perception_type in ["clipseg", "amradio"] and query is not None:
                         image_dict = self.gsplat.render_rgb(camera,T_c2w)
                         # img_cr = icr["semantic"]
                         icr_rgb = image_dict["rgb"]
@@ -907,7 +912,7 @@ class Simulator:
                         end = time.time()
                         if verbose:
                             times.append(end-start)
-                    elif perception == "semantic_depth" and perception_type != "clipseg" and query is not None:
+                    elif perception == "semantic_depth" and perception_type not in ["clipseg", "amradio"] and query is not None:
                         image_dict = self.gsplat.render_rgb(camera,T_c2w,query)
                         icr = image_dict["semantic"]
                         icr_rgb = image_dict["rgb"]
@@ -1118,7 +1123,7 @@ class Simulator:
                         Imgs_rgb[k,:,:,:] = icr_rgb
                         Imgs_depth[k,:,:,:] = icr_depth                
                         # Store validation image if needed
-                        if validation and perception_type != "clipseg":
+                        if validation and perception_type not in ["clipseg", "amradio"]:
                             Imgs_val[k,:,:,:] = icr_val
                     else:
                         # Just store RGB image if no query provided
@@ -1142,7 +1147,7 @@ class Simulator:
 
             # ==== PREPARE RETURN DATA ====
             # Package images based on what was collected
-            if validation and perception_type != "clipseg" and query is not None:
+            if validation and perception_type not in ["clipseg", "amradio"] and query is not None:
                 Iro = {"semantic": Imgs_sem, "depth": Imgs_depth, "rgb": Imgs_rgb, "validation": Imgs_val}
             elif query is not None:
                 Iro = {"semantic": Imgs_sem, "depth": Imgs_depth, "rgb": Imgs_rgb}
@@ -1522,7 +1527,7 @@ class Simulator:
 #                     Imgs_sem[k,:,:,:] = icr
 #                     Imgs_rgb[k,:,:,:] = icr_rgb
 #                     Imgs_depth[k,:,:,:] = icr_depth                
-#                     if validation and perception_type != "clipseg":
+#                     if validation and perception_type not in ["clipseg", "amradio"]:
 #                         Imgs_val[k,:,:,:] = icr_val
 #                 else:
 #                     Imgs_rgb[k,:,:,:] = icr
@@ -1540,7 +1545,7 @@ class Simulator:
 #             print(f"Min time/frame: {min(times)*1000:.1f} ms")
 #             print(f"Max time/frame: {max(times)*1000:.1f} ms")
 
-#         if validation and perception_type != "clipseg" and query is not None:
+#         if validation and perception_type not in ["clipseg", "amradio"] and query is not None:
 #             Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb,"validation":Imgs_val}
 #         elif query is not None:
 #             Iro = {"semantic":Imgs_sem,"depth":Imgs_depth,"rgb":Imgs_rgb}
