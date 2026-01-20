@@ -22,7 +22,7 @@ def get_generation_progress() -> Progress:
         TextColumn("[bold green3] {task.completed:>2}/{task.total} {task.fields[units]}"),
         TimeRemainingColumn(elapsed_when_finished=True),
         console=console,
-        auto_refresh=False,
+        auto_refresh=True,
     )
     return progress
 
@@ -41,7 +41,7 @@ def get_training_progress() -> Progress:
         TextColumn("[bold green3] {task.completed:>2}/{task.total} {task.fields[units]}"),
         TimeRemainingColumn(elapsed_when_finished=True),
         console=console,
-        auto_refresh=False,
+        auto_refresh=True,
     )
     return progress
 
